@@ -1,6 +1,6 @@
 """EVE 制造利润分析器 - 服务器入口"""
-import os, sys, shutil, bz2, json
-from fastapi import FastAPI, Query, Header, HTTPException
+import os, sys, shutil, bz2, json, subprocess, hmac, hashlib
+from fastapi import FastAPI, Query, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -355,6 +355,41 @@ async def api_set_admin(user_id: int = Query(...), is_admin: bool = Query(True),
         raise HTTPException(403, "仅管理员可操作")
     set_admin(user_id, is_admin)
     return {"ok": True}
+
+
+# ===================== GitHub Webhook（自动部署） =====================
+
+import subprocess
+import hmac
+import hashlib
+
+WEBHOOK_SECRET = "eve-profit-deploy-2024"  # 可改成你自己的密钥
+
+
+@app.post("/webhook")
+async def github_webhook(request: Request, x_hub_signature_256: str = Header(None)):
+    body = await request.body()
+    # 验签
+    if x_hub_signature_256:
+        sig = "sha256=" + hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, x_hub_signature_256):
+            raise HTTPException(403, "签名验证失败")
+
+    payload = json.loads(body)
+    branch = payload.get("ref", "")
+    if "main" not in branch and "master" not in branch:
+        return {"ok": True, "message": "忽略非主分支推送"}
+
+    # 后台执行部署
+    subprocess.Popen([
+        "bash", "-c",
+        "cd /home/xiaonaizhao/eve-profit && "
+        "git pull && "
+        "pkill -f main.py && "
+        "nohup venv/bin/python3 main.py > eve.log 2>&1 &"
+    ])
+
+    return {"ok": True, "message": "部署中..."}
 
 
 def from_cache(key):
