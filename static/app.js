@@ -11,6 +11,16 @@ document.addEventListener('DOMContentLoaded', async function() {
   } catch(e) {}
   loadCategories();
   if (typeof checkLogin === 'function') checkLogin();
+  // 搜索框绑定
+  var si = document.getElementById('searchInput');
+  if (si) si.addEventListener('input', function(e) {
+    clearTimeout(debounceTimer);
+    var q = e.target.value.trim();
+    if (q.length < 1) { document.getElementById('searchResults').style.display = 'none'; return; }
+    debounceTimer = setTimeout(async function() {
+      try { var r = await fetch('/api/search?q='+encodeURIComponent(q)), d = await r.json(); renderSearchResults(d.items); } catch(e) {}
+    }, 250);
+  });
 });
 
 function switchTab(tab) {
@@ -69,14 +79,6 @@ async function loadCategoryItems(gid, gname) {
   } catch(e) { l.innerHTML = '<div style="color:#f85149;padding:10px;text-align:center">failed</div>'; }
 }
 
-document.getElementById('searchInput').addEventListener('input', function(e) {
-  clearTimeout(debounceTimer);
-  var q = e.target.value.trim();
-  if (q.length < 1) { document.getElementById('searchResults').style.display = 'none'; return; }
-  debounceTimer = setTimeout(async function() {
-    try { var r = await fetch('/api/search?q='+encodeURIComponent(q)), d = await r.json(); renderSearchResults(d.items); } catch(e) {}
-  }, 250);
-});
 function renderSearchResults(items) {
   var c = document.getElementById('searchResults');
   if (!items || !items.length) { c.style.display = 'none'; return; }
@@ -163,7 +165,7 @@ function renderResult(price, calc) {
     '<div class="quote-card sell"><div class="qlabel">最低卖单价 <span style="font-size:10px;color:#484f58">(去极值)</span></div><div class="qval">'+fmt(sellMin)+'</div><div class="qvol">量 '+fmtV(sellVol)+' | 权均 '+fmtShort(trimmedSell.avg||0)+' | 中位 '+fmtShort(trimmedSell.median||0)+'</div></div>'+
     '<div class="quote-card buy"><div class="qlabel">最高买单价 <span style="font-size:10px;color:#484f58">(去极值)</span></div><div class="qval">'+fmt(buyMax)+'</div><div class="qvol">量 '+fmtV(buyVol)+' | 权均 '+fmtShort(trimmedBuy.avg||0)+' | 中位 '+fmtShort(trimmedBuy.median||0)+'</div></div>'+
     '<div class="quote-card '+(spread<=0?'negative':'')+'"><div class="qlabel">买卖价差</div><div class="qval">'+fmt(spread)+'</div><div class="qvol">'+spPct.toFixed(2)+'%</div></div>'+
-    '<div class="quote-card"><div class="qlabel">7日去极值加权均价</div><div class="qval">'+fmt(d7avg)+'</div><div class="qvol">7d-90d '+(diff>0?'+':(diff<0?'':' '))+fmt(Math.abs(diff))+'</div></div>'+
+    '<div class="quote-card"><div class="qlabel">7日去极值加权均价</div><div class="qval">'+fmt(d7avg)+'</div><div class="qvol">'+(diff>0?'📈 +':(diff<0?'📉 ':'➡ '))+fmt(Math.abs(diff))+' (7d-90d)</div></div>'+
     '</div></div>'+
     '<div class="history-table"><h3>多时段去极值加权均价</h3><table><thead><tr><th>时段</th><th class="text-right">去极值加权均价</th><th class="text-right">数量</th></tr></thead><tbody>'+histRows+'</tbody></table></div>'+
     '<div id="profitSection"></div>';

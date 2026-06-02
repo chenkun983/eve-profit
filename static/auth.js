@@ -113,11 +113,11 @@ function doChangePwd() {
 
 function showAdmin() {
   hideUserMenu();
+  // 切换到排行标签页，把内容替换成管理后台
+  switchTab('ranking');
   var area = document.getElementById('pageRanking');
-  if (area && area.style.display !== 'none') { switchTab('ranking'); }
-  area = document.getElementById('resultArea');
   area.style.display = 'block';
-  area.innerHTML = '<div class="loading">\u52a0\u8f7d\u4e2d...</div>';
+  area.innerHTML = '<h3 style="margin-bottom:12px">\u7ba1\u7406\u540e\u53f0</h3><div class="loading">\u52a0\u8f7d\u4e2d...</div>';
   fetch('/api/admin/users', { headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
     if (!d.ok) { area.innerHTML = '<div class="no-result">\u65e0\u6743\u9650</div>'; return; }
     var h = '<h3 style="margin-bottom:12px">\u7ba1\u7406\u540e\u53f0 - \u4f1a\u5458\u7ba1\u7406</h3><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>ID</th><th>\u7528\u6237\u540d</th><th>\u90ae\u7bb1</th><th>\u7ba1\u7406\u5458</th><th>\u6ce8\u518c\u65f6\u95f4</th></tr></thead><tbody>';
