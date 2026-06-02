@@ -922,17 +922,31 @@ class SDEDatabase:
         return result
 
     def get_items_by_market_group(self, group_id: int) -> list:
+        """获取指定分类下所有物品（递归包含子分类）"""
         conn = self._connect()
+        # 递归获取所有子分类ID
+        all_ids = self._get_descendant_group_ids(conn, group_id)
+        placeholders = ','.join('?' * len(all_ids))
         rows = conn.execute(
-            "SELECT t.typeID, COALESCE(zh.text, t.typeName) as name, t.typeName as name_en "
-            "FROM invTypes t "
-            "LEFT JOIN trnTranslations zh ON zh.tcID=8 AND zh.keyID=t.typeID AND zh.languageID='zh' "
-            "WHERE t.marketGroupID=? AND t.published=1 "
-            "ORDER BY t.typeName LIMIT 200",
-            (group_id,)
+            f"SELECT t.typeID, COALESCE(zh.text, t.typeName) as name, t.typeName as name_en "
+            f"FROM invTypes t "
+            f"LEFT JOIN trnTranslations zh ON zh.tcID=8 AND zh.keyID=t.typeID AND zh.languageID='zh' "
+            f"WHERE t.marketGroupID IN ({placeholders}) AND t.published=1 "
+            f"ORDER BY t.typeName LIMIT 500",
+            tuple(all_ids)
         ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def _get_descendant_group_ids(self, conn, gid: int) -> set:
+        """递归获取分类及其所有子分类ID"""
+        rows = conn.execute(
+            "SELECT marketGroupID FROM invMarketGroups WHERE parentGroupID=?", (gid,)
+        ).fetchall()
+        ids = {gid}
+        for r in rows:
+            ids.update(self._get_descendant_group_ids(conn, r['marketGroupID']))
+        return ids
 
     def get_sde_version(self) -> dict:
         conn = self._connect()

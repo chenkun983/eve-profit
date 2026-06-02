@@ -4,12 +4,14 @@ from typing import Optional
 
 class ManufacturingConfig:
     def __init__(self, solar_system_id=30000142, system_cost_index=0.03,
-                 structure_bonus=0.04, facility_tax=0.01, blueprint_me_level=0):
+                 structure_bonus=0.04, facility_tax=0.01,
+                 blueprint_me_level=0, blueprint_te_level=0):
         self.solar_system_id = solar_system_id
         self.system_cost_index = system_cost_index
         self.structure_bonus = structure_bonus
         self.facility_tax = facility_tax
         self.blueprint_me_level = blueprint_me_level
+        self.blueprint_te_level = blueprint_te_level
 
 
 class ProfitCalculator:
@@ -43,12 +45,13 @@ class ProfitCalculator:
         self.config = config or ManufacturingConfig()
 
     def calculate_with_modes(self, type_id: int,
-                             material_overrides: dict = None) -> Optional[dict]:
+                             material_overrides: dict = None,
+                             use_bom: bool = False) -> Optional[dict]:
         """
         计算指定物品的利润，返回 3 种模式的结果
 
         material_overrides: { materialTypeID: 'buy'|'sell'|'self' }
-            用于单独指定某些材料的定价策略
+        use_bom: True = 用全量材料清单（递归到底）计算利润
         """
         materials = self.db.get_manufacturing_materials(type_id)
         if not materials:
@@ -56,6 +59,22 @@ class ProfitCalculator:
 
         all_ids = [type_id] + list(materials.keys())
         prices = self.market.get_prices_batch(all_ids, self.config.solar_system_id)
+
+        # 如果启用全量 BOM，先把所有直接材料递归到底，用终端物料替代
+        if use_bom:
+            bom_flat = self._resolve_deep_bom(type_id, prices, flatten_only=True)
+            # 把材料清单替换为全量终端物料
+            new_materials = {}
+            for item in bom_flat:
+                tid = item['type_id']
+                new_materials[tid] = new_materials.get(tid, 0) + item['total_quantity']
+            materials = new_materials
+            # 补充查询未被包含在 all_ids 中的物料价格
+            extra_ids = [tid for tid in materials if tid not in prices]
+            if extra_ids:
+                extra_prices = self.market.get_prices_batch(extra_ids, self.config.solar_system_id)
+                prices.update(extra_prices)
+            all_ids = list(materials.keys())
 
         # 获取材料信息
         mat_info = []
@@ -82,6 +101,9 @@ class ProfitCalculator:
         bp = self._bp_info(type_id)
         output_qty = bp['outputQty'] if bp else 1
         mfg_time = self.db.get_manufacturing_time(type_id)
+        # TE时间效率修正
+        te_total = self.config.blueprint_te_level * 0.02
+        eff_time = int(mfg_time / (1 + te_total)) if mfg_time > 0 else 0
 
         overrides = material_overrides or {}
         default_mode = 'sell'  # 默认用卖单价
@@ -152,7 +174,8 @@ class ProfitCalculator:
             total = mat_cost_eff + sys_cost + fac_tax
             profit = revenue - total
             margin = (profit / total * 100) if total > 0 else 0.0
-            isk_hr = profit / (mfg_time / 3600.0) if mfg_time > 0 else 0.0
+            isk_hr = profit / (eff_time / 3600.0) if eff_time > 0 else 0.0
+            profit_24h = profit * (24 * 3600 / eff_time) if eff_time > 0 else 0.0
 
             # 数据质量
             if not product_has_price or prod_price <= 0:
@@ -181,6 +204,7 @@ class ProfitCalculator:
                 'profit': round(profit, 2),
                 'profit_margin': round(margin, 2),
                 'isk_per_hour': round(isk_hr, 2),
+                'profit_24h': round(profit_24h, 2),
                 'missing_materials': missing,
             })
 
@@ -192,9 +216,87 @@ class ProfitCalculator:
             'product_sell_price': product_sell,
             'product_quantity': output_qty,
             'manufacturing_time': mfg_time,
+            'effective_time': eff_time,
             'materials': mat_info,
             'modes': models,
+            'deep_bom': self._resolve_deep_bom(type_id, prices),
         }
+
+    def _resolve_deep_bom(self, product_type_id: int, prices: dict = None,
+                          flatten_only: bool = False) -> list:
+        """
+        递归追溯到最基础材料，返回全量材料清单（扁平汇总）
+        基础矿物（typeID 34-40）和没有蓝图的材料为终端节点
+        """
+        BASE_MINERALS = {34, 35, 36, 37, 38, 39, 40}
+
+        def _resolve(tid: int, qty: int, depth: int = 0, max_d: int = 10,
+                     visited: set = None) -> dict:
+            """返回 { typeID: total_quantity } 的扁平映射"""
+            if visited is None:
+                visited = set()
+            if depth >= max_d or tid in visited:
+                return {tid: qty}
+            visited.add(tid)
+
+            # 基础矿物 → 终端节点
+            if tid in BASE_MINERALS:
+                visited.discard(tid)
+                return {tid: qty}
+
+            # 查该物品是否有蓝图
+            materials = self.db.get_manufacturing_materials(tid)
+            if not materials:
+                # 无蓝图，不可制造，终端节点
+                visited.discard(tid)
+                return {tid: qty}
+
+            # 有蓝图，递归分解
+            result = {}
+            for mat_id, mat_qty in materials.items():
+                sub = _resolve(mat_id, mat_qty * qty, depth + 1, max_d, visited)
+                for sub_id, sub_qty in sub.items():
+                    result[sub_id] = result.get(sub_id, 0) + sub_qty
+
+            visited.discard(tid)
+            return result
+
+        # 获取成品单次产出量
+        bp = self._bp_info(product_type_id)
+        output_qty = bp['outputQty'] if bp else 1
+
+        # 递归分解
+        flat = _resolve(product_type_id, output_qty)
+
+        # 组装结果（按总价降序排列）
+        result = []
+        for tid, total_qty in sorted(flat.items(), key=lambda x: -x[1]):
+            if flatten_only:
+                result.append({
+                    'type_id': tid,
+                    'total_quantity': total_qty,
+                })
+            else:
+                pd = prices.get(tid, {}) if prices else {}
+                buy_p = pd.get('buy', 0) if pd else 0
+                sell_p = pd.get('sell', 0) if pd else 0
+                has_bp = bool(self.db.get_manufacturing_materials(tid))
+                is_base = tid in BASE_MINERALS
+
+                result.append({
+                    'type_id': tid,
+                    'name': self.db.get_chinese_name(tid),
+                    'name_en': self.db.get_english_name(tid),
+                    'total_quantity': total_qty,
+                    'buy_price': buy_p,
+                    'sell_price': sell_p,
+                    'total_buy_cost': round(buy_p * total_qty, 2),
+                    'total_sell_cost': round(sell_p * total_qty, 2),
+                    'is_base_mineral': is_base,
+                    'is_terminal': not has_bp,
+                })
+
+        return result
 
     def _bp_info(self, type_id: int) -> Optional[dict]:
         conn = self.db._connect()

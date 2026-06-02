@@ -1,9 +1,10 @@
 """EVE 制造利润分析器 - 服务器入口"""
 import os, sys, shutil, bz2, json
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Query, Header, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import uvicorn
 import requests as req
 
@@ -12,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.database import SDEDatabase
 from core.market import MarketAPI
 from core.calculator import ProfitCalculator, ManufacturingConfig
+from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist
+from core.ranking import scan_category, scan_watchlist
 
 app = FastAPI(title="EVE 制造利润分析器")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -48,8 +51,9 @@ async def search(q: str = Query(..., min_length=1)):
 @app.get("/api/price")
 async def price(type_id: int = Query(...)):
     """查询单一物品的吉他市场行情"""
-    quote = market.get_market_quote(type_id)
-    if not quote:
+    windows = market.get_market_quote(type_id)
+    trimmed = market.get_market_quote_trimmed(type_id)
+    if not windows and not trimmed:
         return {"ok": False, "message": "无法获取市场价格"}
     name_cn = db.get_chinese_name(type_id)
     name_en = db.get_english_name(type_id)
@@ -58,9 +62,8 @@ async def price(type_id: int = Query(...)):
         "type_id": type_id,
         "name_cn": name_cn,
         "name_en": name_en,
-        "buy": quote['buy'],
-        "sell": quote['sell'],
-        "all": quote['all'],
+        "trimmed": trimmed,       # 当前行情 buy/sell 去极值
+        "windows": windows,       # 多时段汇总去极值
     }
 
 
@@ -71,13 +74,16 @@ async def calculate(
     bonus: float = Query(0.04, ge=0, le=1),
     tax: float = Query(0.01, ge=0, le=1),
     me: int = Query(0, ge=0, le=10),
-    overrides: str = Query(None),  # JSON: {"材料typeID":"buy|sell|self"}
+    te: int = Query(0, ge=0, le=20),
+    overrides: str = Query(None),
+    bom: bool = Query(False),
 ):
     cfg = ManufacturingConfig(
         system_cost_index=sci,
         structure_bonus=bonus,
         facility_tax=tax,
         blueprint_me_level=me,
+        blueprint_te_level=te,
     )
     calc = ProfitCalculator(db, market, cfg)
     mat_overrides = {}
@@ -86,7 +92,7 @@ async def calculate(
             mat_overrides = json.loads(overrides)
         except:
             pass
-    result = calc.calculate_with_modes(type_id, mat_overrides)
+    result = calc.calculate_with_modes(type_id, mat_overrides, use_bom=bom)
     if result:
         return {"ok": True, "data": result}
     return {"ok": False, "message": "无法计算（该物品可能没有制造蓝图）"}
@@ -136,7 +142,11 @@ async def status():
 
 
 @app.post("/api/sde/update")
-async def update_sde():
+async def update_sde(authorization: str = Header(None)):
+    """管理员手动更新SDE"""
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
     """管理员手动更新SDE"""
     try:
         r = req.get(
@@ -182,6 +192,127 @@ async def update_sde():
         import traceback
         traceback.print_exc()
         return {"ok": False, "message": f"更新失败: {str(e)}"}
+
+
+# ===================== 用户认证 =====================
+
+class AuthForm(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/register")
+async def api_register(form: AuthForm):
+    ok, msg = register(form.username, form.password)
+    return {"ok": ok, "message": msg}
+
+
+@app.post("/api/auth/login")
+async def api_login(form: AuthForm):
+    ok, msg, token = login(form.username, form.password)
+    return {"ok": ok, "message": msg, "token": token}
+
+
+@app.post("/api/auth/logout")
+async def api_logout(authorization: str = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        auth_logout(authorization[7:])
+    return {"ok": True}
+
+
+@app.get("/api/auth/status")
+async def auth_status(authorization: str = Header(None)):
+    token = authorization[7:] if authorization and authorization.startswith("Bearer ") else None
+    uid = verify_token(token)
+    is_admin = False
+    if uid:
+        from core import auth as a
+        row = a._connect().execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
+        is_admin = bool(row and row['is_admin'])
+    return {"ok": True, "logged_in": uid is not None, "is_admin": is_admin}
+
+
+# ===================== 关注清单 =====================
+
+def _require_user(authorization: str | None) -> int:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "未登录")
+    uid = verify_token(authorization[7:])
+    if not uid:
+        raise HTTPException(401, "登录已过期")
+    return uid
+
+
+@app.get("/api/watchlist")
+async def api_watchlist(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"items": get_watchlist(uid)}
+
+
+@app.post("/api/watchlist/add")
+async def api_watchlist_add(type_id: int = Query(...), name: str = Query(""),
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    add_watchlist(uid, type_id, name)
+    return {"ok": True}
+
+
+@app.post("/api/watchlist/remove")
+async def api_watchlist_remove(type_id: int = Query(...),
+                                authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    remove_watchlist(uid, type_id)
+    return {"ok": True}
+
+
+# ===================== 利润排行 =====================
+
+@app.get("/api/ranking/category")
+async def ranking_category(group_id: int = Query(...), refresh: bool = False,
+                           authorization: str = Header(None)):
+    _require_user(authorization)
+    key = f"cat_{group_id}"
+    if refresh:
+        data = scan_category(group_id)
+        from core.auth import set_cache
+        set_cache(key, data)
+        return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
+    cached = from_cache(key)
+    if cached is not None:
+        return {"ok": True, "data": cached, "total": len(cached), "source": "cache"}
+    data = scan_category(group_id)
+    from core.auth import set_cache
+    set_cache(key, data)
+    return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
+
+
+@app.get("/api/ranking/watchlist")
+async def ranking_watchlist(refresh: bool = False,
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    key = f"wl_{uid}"
+    if refresh:
+        data = scan_watchlist(uid)
+        from core.auth import set_cache
+        set_cache(key, data)
+        return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
+    cached = from_cache(key)
+    if cached is not None:
+        return {"ok": True, "data": cached, "total": len(cached), "source": "cache"}
+    data = scan_watchlist(uid)
+    from core.auth import set_cache
+    set_cache(key, data)
+    return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
+
+
+def from_cache(key):
+    import json, time
+    from core import auth as a
+    row = a._connect().execute(
+        "SELECT data, cached_at FROM ranking_cache WHERE cache_key=?", (key,)).fetchone()
+    if row and time.time() - row['cached_at'] < 86400:
+        return json.loads(row['data'])
+    return None
 
 
 if __name__ == "__main__":
