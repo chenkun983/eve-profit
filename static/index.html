@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EVE 制造利润分析器</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="header-left">
+      <button id="menuToggle" class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <h1>🛸 EVE 制造利润分析器</h1>
+    </div>
+    <span class="subtitle">SDE: <span id="sdeStatus">检查中...</span></span>
+  </header>
+
+  <div class="main-layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <span>📂 物品分类</span>
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
+      </div>
+      <div id="categoryTree" class="category-tree">加载分类中...</div>
+    </aside>
+
+    <!-- 遮罩层（手机端侧栏展开时） -->
+    <div id="overlay" class="overlay" onclick="toggleSidebar()"></div>
+
+    <main class="content">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="输入物品中文名搜索（如 乌鸦级、三钛合金）" autofocus>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <div id="categoryItems" class="category-items" style="display:none">
+        <div class="category-items-header">
+          <span id="categoryLabel">分类名称</span>
+          <span id="categoryCount" class="count-badge">0</span>
+        </div>
+        <div id="categoryItemList" class="category-item-list"></div>
+      </div>
+
+      <div class="config-bar">
+        <div class="config-group">
+          <label>星系成本</label>
+          <input type="number" id="cfgSci" value="3" min="0" max="30" step="0.1"> %
+          <label>建筑效率</label>
+          <input type="number" id="cfgBonus" value="4" min="0" max="20" step="0.1"> %
+          <label>设施税</label>
+          <input type="number" id="cfgTax" value="1" min="0" max="10" step="0.1"> %
+          <label>蓝图ME</label>
+          <input type="number" id="cfgMe" value="0" min="0" max="10" step="1">
+        </div>
+      </div>
+
+      <div id="resultArea" class="result-area" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

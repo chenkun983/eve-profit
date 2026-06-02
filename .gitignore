@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 日志
+*.log
+
+# 数据文件（SDE 数据库太大，不同步到 Git）
+data/sde.sqlite
+data/sde.sqlite.bz2
+data/sde.sqlite.tmp
+data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db
