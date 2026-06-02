@@ -44,12 +44,26 @@ header h1 { font-size: 22px; color: #58a6ff; }
 
 /* ===== 排行页面 ===== */
 .ranking-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ranking-table th { text-align: left; padding: 10px 8px; color: #8b949e; font-weight: 500; border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22; }
-.ranking-table td { padding: 8px; border-bottom: 1px solid #21262d; }
+.ranking-table th { padding: 10px 8px; color: #8b949e; font-weight: 500; border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #161b22; }
+.ranking-table td { padding: 8px; border-bottom: 1px solid #21262d; white-space: nowrap; }
 .ranking-table tr:hover { background: #1c2128; }
 .rank-num { color: #484f58; font-size: 12px; }
+.ranking-table th:first-child, .ranking-table td:first-child { width: 40px; text-align: center; }
+.ranking-table th:nth-child(2), .ranking-table td:nth-child(2) { text-align: left; }
+.ranking-table th:nth-child(n+3), .ranking-table td:nth-child(n+3) { text-align: right; width: 120px; }
 
 .rank-select { padding: 8px 12px; border: 1px solid #30363d; border-radius: 6px; background: #161b22; color: #c9d1d9; font-size: 14px; }
+.rank-refresh { padding: 8px 14px; border: 1px solid #30363d; border-radius: 6px; background: #21262d; color: #c9d1d9; font-size: 13px; cursor: pointer; }
+.rank-refresh:hover { background: #30363d; }
+.unwatch-btn { display: inline-block; padding: 2px 8px; border: 1px solid #f85149; border-radius: 4px; color: #f85149; font-size: 12px; cursor: pointer; }
+.unwatch-btn:hover { background: #f85149; color: #fff; }
+.watch-btn-sm { display: inline-block; padding: 2px 8px; border: 1px solid #238636; border-radius: 4px; color: #3fb950; font-size: 12px; cursor: pointer; }
+.watch-btn-sm:hover { background: #238636; color: #fff; }
+
+.user-menu { position: absolute; top: 100%; right: 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; z-index: 300; min-width: 120px; display: none; }
+.user-menu-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: #c9d1d9; }
+.user-menu-item:hover { background: #1c2128; }
+.header-right { position: relative; }
 
 .profit-tabs { display: flex; gap: 0; margin: 12px 0; border-bottom: 1px solid #30363d; }
 .profit-tab { padding: 8px 16px; border: none; background: none; color: #8b949e; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -58,6 +72,9 @@ header h1 { font-size: 22px; color: #58a6ff; }
 
 .watch-btn { padding: 4px 12px; border: 1px solid #238636; border-radius: 6px; background: transparent; color: #3fb950; font-size: 12px; cursor: pointer; margin-left: 8px; }
 .watch-btn:hover { background: #238636; color: #fff; }
+
+.save-overrides-btn { margin-left: 10px; padding: 3px 10px; border: 1px solid #1f6feb; border-radius: 4px; background: transparent; color: #58a6ff; font-size: 12px; cursor: pointer; }
+.save-overrides-btn:hover { background: #1f6feb; color: #fff; }
 
 /* ===== Main Layout ===== */
 .main-layout { display: flex; gap: 16px; position: relative; }

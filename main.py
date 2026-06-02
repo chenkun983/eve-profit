@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.database import SDEDatabase
 from core.market import MarketAPI
 from core.calculator import ProfitCalculator, ManufacturingConfig
-from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist
+from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_admin
 from core.ranking import scan_category, scan_watchlist
 
 app = FastAPI(title="EVE 制造利润分析器")
@@ -265,6 +265,28 @@ async def api_watchlist_remove(type_id: int = Query(...),
     return {"ok": True}
 
 
+# ===================== 材料来源保存 =====================
+
+@app.post("/api/save-overrides")
+async def api_save_overrides(type_id: int = Query(...), overrides: str = Query("{}"),
+                              authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    try:
+        data = json.loads(overrides)
+    except:
+        data = {}
+    save_material_overrides(uid, type_id, data)
+    return {"ok": True}
+
+
+@app.get("/api/load-overrides")
+async def api_load_overrides(type_id: int = Query(...),
+                              authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    data = load_material_overrides(uid, type_id)
+    return {"ok": True, "overrides": data}
+
+
 # ===================== 利润排行 =====================
 
 @app.get("/api/ranking/category")
@@ -287,22 +309,52 @@ async def ranking_category(group_id: int = Query(...), refresh: bool = False,
 
 
 @app.get("/api/ranking/watchlist")
-async def ranking_watchlist(refresh: bool = False,
-                            authorization: str = Header(None)):
+async def ranking_watchlist(authorization: str = Header(None)):
+    """关注清单实时扫描，不缓存"""
     uid = _require_user(authorization)
-    key = f"wl_{uid}"
-    if refresh:
-        data = scan_watchlist(uid)
-        from core.auth import set_cache
-        set_cache(key, data)
-        return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
-    cached = from_cache(key)
-    if cached is not None:
-        return {"ok": True, "data": cached, "total": len(cached), "source": "cache"}
     data = scan_watchlist(uid)
-    from core.auth import set_cache
-    set_cache(key, data)
-    return {"ok": True, "data": data, "total": len(data), "source": "fresh"}
+    return {"ok": True, "data": data, "total": len(data)}
+
+
+# ===================== 用户资料 =====================
+
+@app.get("/api/profile")
+async def api_profile(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "profile": get_profile(uid)}
+
+
+class ProfileForm(BaseModel):
+    email: str = ""
+    old_password: str = ""
+    new_password: str = ""
+
+
+@app.post("/api/profile/update")
+async def api_update_profile(form: ProfileForm, authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = update_profile(uid, email=form.email or None,
+                             old_password=form.old_password or None,
+                             new_password=form.new_password or None)
+    return {"ok": ok, "message": msg}
+
+
+@app.get("/api/admin/users")
+async def api_admin_users(authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可查看")
+    return {"ok": True, "users": list_users()}
+
+
+@app.post("/api/admin/set-admin")
+async def api_set_admin(user_id: int = Query(...), is_admin: bool = Query(True),
+                         authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    set_admin(user_id, is_admin)
+    return {"ok": True}
 
 
 def from_cache(key):

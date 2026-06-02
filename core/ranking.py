@@ -74,10 +74,12 @@ def scan_category(group_id):
         if sell_min == 0 and buy_max == 0:
             continue
 
-        # 倒卖利润
-        buy_cost = sell_min * (1 + broker_fee)
-        sell_revenue = buy_max * (1 - broker_fee - sales_tax)
-        flip_profit = round(sell_revenue - buy_cost, 2) if sell_min > 0 and buy_max > 0 else 0
+        # 倒卖利润：按收单价买入，按卖单价卖出
+        # 买入成本 = 收单中位数 × (1 + 挂单费率)
+        buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
+        # 卖出收入 = 卖单中位数 × (1 - 挂单费率 - 销售税率)
+        sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
+        flip_profit = round(sell_revenue - buy_cost, 2) if buy_cost > 0 and sell_revenue > 0 else 0
         flip_margin = round((sell_revenue - buy_cost) / buy_cost * 100, 1) if buy_cost > 0 and sell_revenue > buy_cost else 0
 
         item_data = {
@@ -132,7 +134,15 @@ def scan_watchlist(user_id):
     if not watch:
         return []
     type_ids = [w['type_id'] for w in watch]
-    prices = batch_get_prices(type_ids)
+    
+    # 收集所有材料ID一并查价
+    all_mat_ids = set(type_ids)
+    for w in watch:
+        mats = db_sde.get_manufacturing_materials(w['type_id'])
+        if mats:
+            all_mat_ids.update(mats.keys())
+    
+    prices = batch_get_prices(list(all_mat_ids))
 
     result = []
     broker_fee = 0.0075
@@ -141,12 +151,12 @@ def scan_watchlist(user_id):
     for item in watch:
         tid = item['type_id']
         p = prices.get(tid, {})
-        sell_min = p.get('sell_min', 0)
-        buy_max = p.get('buy_max', 0)
+        buy_med = p.get('buy_median', 0)
+        sell_med = p.get('sell_median', 0)
 
-        buy_cost = sell_min * (1 + broker_fee)
-        sell_revenue = buy_max * (1 - broker_fee - sales_tax)
-        flip_profit = round(sell_revenue - buy_cost, 2) if sell_min > 0 and buy_max > 0 else 0
+        buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
+        sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
+        flip_profit = round(sell_revenue - buy_cost, 2) if buy_med > 0 and sell_med > 0 else 0
         flip_margin = round((sell_revenue - buy_cost) / buy_cost * 100, 1) if buy_cost > 0 and sell_revenue > buy_cost else 0
 
         item_data = {
@@ -171,10 +181,12 @@ def scan_watchlist(user_id):
                     'sell': mp.get('sell_median', 0),
                     'buy_volume': 0, 'sell_volume': 0,
                 }
+            # 加载用户保存的材料定价配置
+            saved = auth.load_material_overrides(user_id, tid)
             cfg = ManufacturingConfig()
             calc = ProfitCalculator(db_sde, market_api, cfg)
             calc.market.get_prices_batch = lambda ids, sys=30000142: mock_prices
-            r = calc.calculate_with_modes(tid)
+            r = calc.calculate_with_modes(tid, material_overrides=saved)
             if r:
                 for m in r['modes']:
                     item_data[m['key']] = {
@@ -189,5 +201,5 @@ def scan_watchlist(user_id):
 
         result.append(item_data)
 
-    result.sort(key=lambda x: max(x['ideal']['profit'] if x['ideal'] else 0, x['flip_profit']), reverse=True)
+    result.sort(key=lambda x: max(x['realistic']['profit'] if x['realistic'] else 0, x['flip_profit']), reverse=True)
     return result

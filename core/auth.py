@@ -20,14 +20,17 @@ def _connect():
 
 def init_db():
     conn = _connect()
+    # 兼容旧表迁移
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            email TEXT DEFAULT '',
             is_admin INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        
         CREATE TABLE IF NOT EXISTS tokens (
             token TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -48,7 +51,26 @@ def init_db():
             data TEXT NOT NULL,
             cached_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS material_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            product_type_id INTEGER NOT NULL,
+            material_type_id INTEGER NOT NULL,
+            pricing_mode TEXT NOT NULL DEFAULT 'sell',
+            UNIQUE(user_id, product_type_id, material_type_id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
     """)
+    conn.commit()
+    # 迁移：兼容旧表（可能缺少某些列）
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -166,6 +188,101 @@ def is_watched(user_id: int, type_id: int) -> bool:
                       (user_id, type_id)).fetchone()
     conn.close()
     return row is not None
+
+
+# ========== 材料来源保存 ==========
+
+def save_material_overrides(user_id: int, product_type_id: int, overrides: dict):
+    """保存用户对某物品的材料定价设置
+    overrides: { material_type_id_str: 'buy'|'sell'|'self' }
+    """
+    conn = _connect()
+    conn.execute("DELETE FROM material_overrides WHERE user_id=? AND product_type_id=?",
+                (user_id, product_type_id))
+    for mat_id_str, mode in overrides.items():
+        try:
+            if mat_id_str == '_config':
+                # 保存配置参数
+                import json as _json
+                conn.execute("INSERT OR REPLACE INTO material_overrides (user_id, product_type_id, material_type_id, pricing_mode) VALUES (?, ?, ?, ?)",
+                            (user_id, product_type_id, -1, _json.dumps(mode)))
+            else:
+                mat_id = int(mat_id_str)
+                conn.execute(
+                    "INSERT INTO material_overrides (user_id, product_type_id, material_type_id, pricing_mode) VALUES (?, ?, ?, ?)",
+                    (user_id, product_type_id, mat_id, mode)
+                )
+        except (ValueError, sqlite3.IntegrityError):
+            continue
+    conn.commit()
+    conn.close()
+
+
+def load_material_overrides(user_id: int, product_type_id: int) -> dict:
+    """加载用户对某物品的材料定价设置"""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT material_type_id, pricing_mode FROM material_overrides WHERE user_id=? AND product_type_id=?",
+        (user_id, product_type_id)
+    ).fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        if r['material_type_id'] == -1:
+            import json as _json
+            try:
+                result['_config'] = _json.loads(r['pricing_mode'])
+            except:
+                pass
+        else:
+            result[str(r['material_type_id'])] = r['pricing_mode']
+    return result
+
+
+# ========== 用户资料 ==========
+
+def get_profile(user_id: int) -> dict:
+    conn = _connect()
+    row = conn.execute("SELECT username, email, is_admin, created_at FROM users WHERE id=?",
+                      (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def update_profile(user_id: int, email: str = None, old_password: str = None, new_password: str = None) -> tuple:
+    """更新资料，返回 (成功, 消息)"""
+    conn = _connect()
+    try:
+        if email is not None:
+            conn.execute("UPDATE users SET email=? WHERE id=?", (email, user_id))
+        if old_password and new_password:
+            row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row or row['password_hash'] != hashlib.sha256(old_password.encode()).hexdigest():
+                conn.close()
+                return False, "原密码错误"
+            conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                        (hashlib.sha256(new_password.encode()).hexdigest(), user_id))
+        conn.commit()
+        return True, "更新成功"
+    finally:
+        conn.close()
+
+
+def list_users() -> list:
+    """管理员获取用户列表"""
+    conn = _connect()
+    rows = conn.execute("SELECT id, username, email, is_admin, created_at FROM users ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def set_admin(user_id: int, is_admin: bool = True) -> bool:
+    """设置/取消管理员"""
+    conn = _connect()
+    conn.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, user_id))
+    conn.commit()
+    conn.close()
+    return True
 
 
 # ========== 排行缓存 ==========
