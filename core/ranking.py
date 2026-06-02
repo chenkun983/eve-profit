@@ -1,4 +1,4 @@
-"""利润排行扫描器（全批量版）"""
+"""利润排行扫描器"""
 import requests, xml.etree.ElementTree as ET
 from core.calculator import ProfitCalculator, ManufacturingConfig
 from core.database import SDEDatabase
@@ -7,7 +7,6 @@ from core import auth
 
 db_sde = SDEDatabase()
 market_api = MarketAPI(cache_ttl=3600)
-
 
 def batch_get_prices(type_ids):
     result = {}
@@ -33,23 +32,31 @@ def batch_get_prices(type_ids):
         except: continue
     return result
 
+def _prices_to_mock(raw):
+    r = {}
+    for pid, p in raw.items():
+        r[pid] = {'buy': p.get('buy_median',0), 'sell': p.get('sell_median',0),
+                  'sell_min': p.get('sell_min',0), 'buy_volume': 0, 'sell_volume': 0}
+    return r
 
 def scan_category(group_id):
     items = db_sde.get_items_by_market_group(group_id)
     if not items: return []
-    type_ids = [i['typeID'] for i in items]
-    # 收集所有材料的ID一并查价
-    all_ids = set(type_ids)
+    all_ids = set(i['typeID'] for i in items)
     for item in items:
         m = db_sde.get_manufacturing_materials(item['typeID'])
         if m: all_ids.update(m.keys())
-    prices = batch_get_prices(list(all_ids))
-
+        try:
+            bom = ProfitCalculator(db_sde, market_api).resolve_deep_bom_flat(item['typeID'])
+            all_ids.update(b['type_id'] for b in bom)
+        except: continue
+    raw_prices = batch_get_prices(list(all_ids))
+    prices = _prices_to_mock(raw_prices)
     result = []; broker_fee = 0.0075; sales_tax = 0.01
     for item in items:
         tid = item['typeID']; p = prices.get(tid, {})
-        sell_min = p.get('sell_min',0); buy_max = p.get('buy_max',0)
-        buy_med = p.get('buy_median',0); sell_med = p.get('sell_median',0)
+        sell_min = p.get('sell',0); buy_max = p.get('buy',0)
+        buy_med = p.get('buy',0); sell_med = p.get('sell',0)
         if sell_min == 0 and buy_max == 0: continue
         buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
         sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
@@ -58,17 +65,12 @@ def scan_category(group_id):
         item_data = {'type_id': tid, 'name': item.get('name') or db_sde.get_chinese_name(tid),
             'name_en': item.get('name_en') or db_sde.get_english_name(tid),
             'flip_profit': flip_profit, 'flip_margin': flip_margin,
-            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None}
+            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None, 'wholesale': None}
         mats = db_sde.get_manufacturing_materials(tid)
         if mats:
             item_data['has_blueprint'] = True
-            mock_prices = {}
-            for aid in [tid] + list(mats.keys()):
-                mp = prices.get(aid, {})
-                mock_prices[aid] = {'buy': mp.get('buy_median',0), 'sell': mp.get('sell_median',0), 'buy_volume': 0, 'sell_volume': 0}
-            cfg = ManufacturingConfig()
-            calc = ProfitCalculator(db_sde, market_api, cfg)
-            calc.market.get_prices_batch = lambda ids, sys=30000142: mock_prices
+            calc = ProfitCalculator(db_sde, market_api, ManufacturingConfig())
+            calc.market.get_prices_batch = lambda ids, s=30000142: prices
             r = calc.calculate_with_modes(tid)
             if r:
                 for m in r['modes']:
@@ -79,20 +81,23 @@ def scan_category(group_id):
     result.sort(key=lambda x: max(x['realistic']['profit'] if x['realistic'] else 0, x['flip_profit']), reverse=True)
     return result
 
-
-def scan_watchlist(user_id):
+def scan_watchlist(user_id, discount=0.9):
     watch = auth.get_watchlist(user_id)
     if not watch: return []
-    type_ids = [w['type_id'] for w in watch]
-    all_ids = set(type_ids)
+    all_ids = set(w['type_id'] for w in watch)
     for w in watch:
         m = db_sde.get_manufacturing_materials(w['type_id'])
         if m: all_ids.update(m.keys())
-    prices = batch_get_prices(list(all_ids))
+        try:
+            bom = ProfitCalculator(db_sde, market_api).resolve_deep_bom_flat(w['type_id'])
+            all_ids.update(b['type_id'] for b in bom)
+        except: continue
+    raw_prices = batch_get_prices(list(all_ids))
+    prices = _prices_to_mock(raw_prices)
     result = []; broker_fee = 0.0075; sales_tax = 0.01
     for item in watch:
         tid = item['type_id']; p = prices.get(tid, {})
-        buy_med = p.get('buy_median',0); sell_med = p.get('sell_median',0)
+        buy_med = p.get('buy',0); sell_med = p.get('sell',0)
         buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
         sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
         flip_profit = round(sell_revenue - buy_cost, 2) if buy_med > 0 and sell_med > 0 else 0
@@ -100,18 +105,13 @@ def scan_watchlist(user_id):
         item_data = {'type_id': tid, 'name': item.get('name_cn') or db_sde.get_chinese_name(tid),
             'name_en': db_sde.get_english_name(tid),
             'flip_profit': flip_profit, 'flip_margin': flip_margin,
-            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None}
+            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None, 'wholesale': None}
         mats = db_sde.get_manufacturing_materials(tid)
         if mats:
             item_data['has_blueprint'] = True
-            mock_prices = {}
-            for aid in [tid] + list(mats.keys()):
-                mp = prices.get(aid, {})
-                mock_prices[aid] = {'buy': mp.get('buy_median',0), 'sell': mp.get('sell_median',0), 'buy_volume': 0, 'sell_volume': 0}
             saved = auth.load_material_overrides(user_id, tid)
-            cfg = ManufacturingConfig()
-            calc = ProfitCalculator(db_sde, market_api, cfg)
-            calc.market.get_prices_batch = lambda ids, sys=30000142: mock_prices
+            calc = ProfitCalculator(db_sde, market_api, ManufacturingConfig(wholesale_discount=discount))
+            calc.market.get_prices_batch = lambda ids, s=30000142: prices
             r = calc.calculate_with_modes(tid, material_overrides=saved)
             if r:
                 for m in r['modes']:

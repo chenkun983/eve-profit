@@ -60,6 +60,13 @@ def init_db():
             UNIQUE(user_id, product_type_id, material_type_id),
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER NOT NULL,
+            setting_key TEXT NOT NULL,
+            setting_value TEXT NOT NULL DEFAULT '',
+            UNIQUE(user_id, setting_key),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
     """)
     conn.commit()
     # 迁移：兼容旧表（可能缺少某些列）
@@ -283,6 +290,22 @@ def set_admin(user_id: int, is_admin: bool = True) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+def save_setting(user_id: int, key: str, value: str):
+    conn = _connect()
+    conn.execute("INSERT OR REPLACE INTO user_settings (user_id, setting_key, setting_value) VALUES (?, ?, ?)",
+                (user_id, key, value))
+    conn.commit()
+    conn.close()
+
+
+def load_setting(user_id: int, key: str, default: str = "") -> str:
+    conn = _connect()
+    row = conn.execute("SELECT setting_value FROM user_settings WHERE user_id=? AND setting_key=?",
+                      (user_id, key)).fetchone()
+    conn.close()
+    return row['setting_value'] if row else default
 
 
 # ========== 排行缓存 ==========

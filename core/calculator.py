@@ -6,26 +6,34 @@ from typing import Optional
 class ManufacturingConfig:
     def __init__(self, solar_system_id=30000142, system_cost_index=0.03,
                  structure_bonus=0.04, facility_tax=0.01,
-                 blueprint_me_level=10, blueprint_te_level=20):
+                 blueprint_me_level=10, blueprint_te_level=20,
+                 wholesale_discount=0.9):
         self.solar_system_id = solar_system_id
         self.system_cost_index = system_cost_index
         self.structure_bonus = structure_bonus
         self.facility_tax = facility_tax
         self.blueprint_me_level = blueprint_me_level
         self.blueprint_te_level = blueprint_te_level
+        self.wholesale_discount = wholesale_discount
 
 
 class ProfitCalculator:
     PRICING_MODES = [
-        {'key': 'realistic', 'label': '蓝图材料利润',
-         'desc': '按蓝图直接材料用量 × 卖单价计算实时利润',
+        {'key': 'realistic', 'label': '蓝图材料零售利润',
+         'desc': '蓝图材料 × 卖单价，成品按最低卖单价出售',
          'mat_price_mode': 'sell', 'prod_price_mode': 'sell'},
-        {'key': 'ideal', 'label': '基础材料利润',
-         'desc': '全量追溯至基础矿物/终端物料 × 卖单价计算实时利润',
+        {'key': 'ideal', 'label': '基础材料零售利润',
+         'desc': '全量追溯材料 × 卖单价，成品按最低卖单价出售',
          'mat_price_mode': 'sell', 'prod_price_mode': 'sell', 'use_bom': True},
-        {'key': 'conservative', 'label': '保守利润',
-         'desc': '材料按卖单价秒买，成品按收单价秒出',
+        {'key': 'conservative', 'label': '收单价利润',
+         'desc': '材料按卖单价买，成品按最高收单价秒出',
          'mat_price_mode': 'sell', 'prod_price_mode': 'buy'},
+        {'key': 'wholesale_bp', 'label': '蓝图材料批发利润',
+         'desc': '蓝图材料成本，成品按最低卖单价90%批发出售',
+         'mat_price_mode': 'sell', 'prod_price_mode': 'wholesale'},
+        {'key': 'wholesale_bm', 'label': '基础材料批发利润',
+         'desc': '全量追溯材料成本，成品按最低卖单价90%批发出售',
+         'mat_price_mode': 'sell', 'prod_price_mode': 'wholesale', 'use_bom': True},
     ]
 
     def __init__(self, sde_db, market_api, config: ManufacturingConfig = None):
@@ -33,7 +41,7 @@ class ProfitCalculator:
         self.market = market_api
         self.config = config or ManufacturingConfig()
 
-    def calculate_with_modes(self, type_id, material_overrides=None, use_bom=False):
+    def calculate_with_modes(self, type_id, material_overrides=None, use_bom=False, material_ratios=None):
         materials = self.db.get_manufacturing_materials(type_id)
         if not materials:
             return None
@@ -55,13 +63,16 @@ class ProfitCalculator:
             all_ids = list(materials.keys())
 
         mat_info = []
+        ratios = material_ratios or {}
         for mat_id, qty in materials.items():
             pd = prices.get(mat_id, {})
+            r = ratios.get(str(mat_id), 1.0)
             mat_info.append({
                 'type_id': mat_id,
                 'name': self.db.get_chinese_name(mat_id),
                 'name_en': self.db.get_english_name(mat_id),
                 'quantity': qty,
+                'ratio': r,
                 'buy_price': pd.get('buy', 0) if pd else 0,
                 'sell_price': pd.get('sell', 0) if pd else 0,
                 'has_price': bool(pd and pd.get('buy', 0) > 0),
@@ -71,6 +82,8 @@ class ProfitCalculator:
         product_has_price = bool(product_pd and product_pd.get('sell', 0) > 0)
         product_buy = product_pd.get('buy', 0) if product_pd else 0
         product_sell = product_pd.get('sell', 0) if product_pd else 0
+        product_sell_min = product_pd.get('sell_min', product_sell) if product_pd else 0
+        product_buy_max = product_pd.get('buy_max', product_buy) if product_pd else 0
 
         total_me = self.config.structure_bonus + self.config.blueprint_me_level * 0.01
         efficiency = 1.0 / (1.0 + total_me)
@@ -147,7 +160,7 @@ class ProfitCalculator:
                         'quantity': m['quantity'],
                     })
 
-                base = price * m['quantity']
+                base = price * m['quantity'] * m.get('ratio', 1.0)
                 eff = base * efficiency
                 mat_cost += base
                 mat_cost_eff += eff
@@ -163,9 +176,18 @@ class ProfitCalculator:
                     'effective_cost': round(eff, 2),
                     'has_price': has_p,
                     'pricing_mode': override or mode['mat_price_mode'],
+                    'ratio': m.get('ratio', 1.0),
                 })
 
-            prod_price = product_sell if mode['prod_price_mode'] == 'sell' else product_buy
+            # 成品价格：零售用最低卖价，收单价用最高买价，批发用卖价打折
+            prod_price = product_sell_min  # 零售用最低卖单价
+            if mode['prod_price_mode'] == 'wholesale':
+                wd = self.config.wholesale_discount if hasattr(self.config, 'wholesale_discount') else 0.9
+                prod_price = product_sell_min * wd
+            elif mode['prod_price_mode'] == 'buy':
+                prod_price = product_buy_max  # 收单用最高买单价
+            else:
+                prod_price = product_sell
             revenue = prod_price * output_qty
 
             sys_cost = mat_cost_eff * self.config.system_cost_index
@@ -212,6 +234,8 @@ class ProfitCalculator:
             'name_en': self.db.get_english_name(type_id),
             'product_buy_price': product_buy,
             'product_sell_price': product_sell,
+            'product_sell_min': product_sell_min,
+            'product_buy_max': product_buy_max,
             'product_quantity': output_qty,
             'manufacturing_time': mfg_time,
             'effective_time': eff_time,
@@ -280,3 +304,8 @@ class ProfitCalculator:
             (type_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    def resolve_deep_bom_flat(self, type_id):
+        """返回全量材料扁平列表 [{type_id, total_quantity}, ...] 用于批量查价"""
+        r = self._resolve_deep_bom(type_id, flatten_only=True)
+        return r if r else []

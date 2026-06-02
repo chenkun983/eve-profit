@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.database import SDEDatabase
 from core.market import MarketAPI
 from core.calculator import ProfitCalculator, ManufacturingConfig
-from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_admin
+from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_admin, save_setting, load_setting
 from core.ranking import scan_category, scan_watchlist
 
 app = FastAPI(title="EVE 制造利润分析器")
@@ -52,8 +52,7 @@ async def search(q: str = Query(..., min_length=1)):
 async def price(type_id: int = Query(...)):
     """查询单一物品的吉他市场行情"""
     windows = market.get_market_quote(type_id)
-    trimmed = market.get_market_quote_trimmed(type_id)
-    if not windows and not trimmed:
+    if not windows:
         return {"ok": False, "message": "无法获取市场价格"}
     name_cn = db.get_chinese_name(type_id)
     name_en = db.get_english_name(type_id)
@@ -62,7 +61,6 @@ async def price(type_id: int = Query(...)):
         "type_id": type_id,
         "name_cn": name_cn,
         "name_en": name_en,
-        "trimmed": trimmed,       # 当前行情 buy/sell 去极值
         "windows": windows,       # 多时段汇总去极值
     }
 
@@ -76,6 +74,7 @@ async def calculate(
     me: int = Query(0, ge=0, le=10),
     te: int = Query(0, ge=0, le=20),
     overrides: str = Query(None),
+    material_ratios: str = Query(None),
     bom: bool = Query(False),
 ):
     cfg = ManufacturingConfig(
@@ -87,15 +86,24 @@ async def calculate(
     )
     calc = ProfitCalculator(db, market, cfg)
     mat_overrides = {}
+    mat_ratios = {}
     if overrides:
         try:
             mat_overrides = json.loads(overrides)
         except:
             pass
-    result = calc.calculate_with_modes(type_id, mat_overrides, use_bom=bom)
+    if material_ratios:
+        try:
+            # 转成数字 key
+            raw = json.loads(material_ratios)
+            for k, v in raw.items():
+                mat_ratios[str(k)] = float(v)
+        except:
+            pass
+    result = calc.calculate_with_modes(type_id, mat_overrides, use_bom=bom, material_ratios=mat_ratios)
     if result:
         return {"ok": True, "data": result}
-    return {"ok": False, "message": "无法计算（该物品可能没有制造蓝图）"}
+    return {"ok": False, "message": "无法计算"}
 
 
 @app.get("/api/categories")
@@ -309,10 +317,11 @@ async def ranking_category(group_id: int = Query(...), refresh: bool = False,
 
 
 @app.get("/api/ranking/watchlist")
-async def ranking_watchlist(authorization: str = Header(None)):
-    """关注清单实时扫描，不缓存"""
+async def ranking_watchlist(discount: float = Query(0.9, ge=0.5, le=1.0),
+                              authorization: str = Header(None)):
+    """关注清单实时扫描"""
     uid = _require_user(authorization)
-    data = scan_watchlist(uid)
+    data = scan_watchlist(uid, discount=discount)
     return {"ok": True, "data": data, "total": len(data)}
 
 
@@ -345,6 +354,22 @@ async def api_admin_users(authorization: str = Header(None)):
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可查看")
     return {"ok": True, "users": list_users()}
+
+
+@app.post("/api/save-setting")
+async def api_save_setting(key: str = Query(...), value: str = Query(""),
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    save_setting(uid, key, value)
+    return {"ok": True}
+
+
+@app.get("/api/load-setting")
+async def api_load_setting(key: str = Query(...), default: str = Query(""),
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    val = load_setting(uid, key, default)
+    return {"ok": True, "value": val}
 
 
 @app.post("/api/admin/set-admin")

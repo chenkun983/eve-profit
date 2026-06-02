@@ -3,23 +3,44 @@ let debounceTimer = null;
 let lastCalcData = null;
 let bomActive = false;
 
+async function searchInputChanged() {
+  clearTimeout(debounceTimer);
+  var si = document.getElementById('searchInput');
+  if (!si) return;
+  var q = si.value.trim();
+  if (q.length < 1) { var sr = document.getElementById('searchResults'); if (sr) sr.style.display = 'none'; return; }
+  await new Promise(function(r){ debounceTimer = setTimeout(r, 200); });
+  try {
+    var r = await fetch('/api/search?q='+encodeURIComponent(q)), d = await r.json();
+    var c = document.getElementById('searchResults');
+    if (!c) return;
+      if (!d.items || !d.items.length) { c.style.display = 'none'; return; }
+      var html = '';
+      for (var i = 0; i < d.items.length; i++) {
+        html += '<div class="search-result-item" data-typeid="'+d.items[i].typeID+'" data-name="'+d.items[i].name.replace(/'/g,"\\'")+'"><span>'+d.items[i].name+'</span><span class="result-typeid">#'+d.items[i].typeID+'</span></div>';
+      }
+      c.innerHTML = html; c.style.display = 'block';
+      // 给每个结果项绑定点击事件
+      c.querySelectorAll('.search-result-item').forEach(function(el) {
+        el.addEventListener('click', function(e) {
+          e.stopPropagation();
+          selectItem(parseInt(el.dataset.typeid), el.dataset.name);
+        });
+      });
+    } catch(e) {}
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
   try {
     var res = await fetch('/api/status'), data = await res.json(), el = document.getElementById('sdeStatus');
     if (data.sde_ok) { el.textContent = '已加载 ('+data.sde_info.size_mb+'MB, '+data.sde_info.blueprints+' 个蓝图)'; el.style.color = '#3fb950'; }
     else { el.textContent = '未加载 SDE'; el.style.color = '#f85149'; }
   } catch(e) {}
-  loadCategories();
-  if (typeof checkLogin === 'function') checkLogin();
-  // 搜索框绑定
-  var si = document.getElementById('searchInput');
-  if (si) si.addEventListener('input', function(e) {
-    clearTimeout(debounceTimer);
-    var q = e.target.value.trim();
-    if (q.length < 1) { document.getElementById('searchResults').style.display = 'none'; return; }
-    debounceTimer = setTimeout(async function() {
-      try { var r = await fetch('/api/search?q='+encodeURIComponent(q)), d = await r.json(); renderSearchResults(d.items); } catch(e) {}
-    }, 250);
+  try { loadCategories(); } catch(e) {}
+  try { if (typeof checkLogin === 'function') checkLogin(); } catch(e) {}
+  document.addEventListener('click', function(e) {
+    var sr = document.getElementById('searchResults');
+    if (sr && !e.target.closest('.search-box')) sr.style.display = 'none';
   });
 });
 
@@ -72,21 +93,19 @@ async function loadCategoryItems(gid, gname) {
     if (!d.items.length) { l.innerHTML = '<div style="color:#484f58;padding:10px;text-align:center">empty</div>'; return; }
     var html = '';
     for (var i = 0; i < d.items.length; i++) {
-      var name = d.items[i].name.replace(/'/g, "\\'");
-      html += '<div class="cat-item" onclick="selectItem('+d.items[i].typeID+',\''+name+'\')">'+d.items[i].name+'</div>';
+      html += '<div class="cat-item" data-typeid="'+d.items[i].typeID+'" data-name="'+d.items[i].name.replace(/'/g,"\\'")+'">'+d.items[i].name+'</div>';
     }
     l.innerHTML = html;
+    // 事件委托：点击分类物品跳转
+    l.onclick = function(e) {
+      var target = e.target.closest('.cat-item');
+      if (target) {
+        var tid = parseInt(target.dataset.typeid);
+        var name = target.dataset.name;
+        if (tid) selectItem(tid, name);
+      }
+    };
   } catch(e) { l.innerHTML = '<div style="color:#f85149;padding:10px;text-align:center">failed</div>'; }
-}
-
-function renderSearchResults(items) {
-  var c = document.getElementById('searchResults');
-  if (!items || !items.length) { c.style.display = 'none'; return; }
-  var html = '';
-  for (var i = 0; i < items.length; i++) {
-    html += '<div class="search-result-item" onclick="selectItem('+items[i].typeID+',\''+items[i].name.replace(/'/g,"\\'")+')"><span>'+items[i].name+'</span><span class="result-typeid">#'+items[i].typeID+'</span></div>';
-  }
-  c.innerHTML = html; c.style.display = 'block';
 }
 
 function selectItem(typeId, name) {
@@ -145,11 +164,31 @@ function recalcWithOverrides(overrides) {
   fetch('/api/calculate?'+params.toString()).then(function(r){return r.json()}).then(function(d){ if (d.ok) { lastCalcData = d.data; renderProfit(d.data); } });
 }
 
+function recalcWithRatios() {
+  if (!lastCalcData || !selectedTypeId) return;
+  var ov = {}, ratios = {};
+  var list = bomActive && lastCalcData.deep_bom ? lastCalcData.deep_bom : lastCalcData.materials;
+  for (var i = 0; i < list.length; i++) {
+    var el = document.getElementById('mat-mode-'+list[i].type_id);
+    if (el) ov[list[i].type_id] = el.value;
+    var rl = document.getElementById('mat-ratio-'+list[i].type_id);
+    if (rl) ratios[list[i].type_id] = parseFloat(rl.value);
+  }
+  var cfg = getCfg();
+  var params = new URLSearchParams({type_id: selectedTypeId, sci: cfg.sci, bonus: cfg.bonus, tax: cfg.tax, me: cfg.me, te: cfg.te,
+    overrides: JSON.stringify(ov), material_ratios: JSON.stringify(ratios)});
+  if (bomActive) params.append('bom', 'true');
+  fetch('/api/calculate?'+params.toString()).then(function(r){return r.json()}).then(function(d){ if (d.ok) { lastCalcData = d.data; renderProfit(d.data); } });
+}
+
 function renderResult(price, calc) {
   var area = document.getElementById('resultArea');
-  var trimmed = price.trimmed || {}, trimmedBuy = trimmed.buy || {}, trimmedSell = trimmed.sell || {};
   var w = price.windows || {};
-  var sellMin = trimmedSell.min||0, buyMax = trimmedBuy.max||0, sellVol = trimmedSell.volume||0, buyVol = trimmedBuy.volume||0;
+  var sellMin = (w['7d']||{}).sell_min || 0;
+  var buyMax = (w['7d']||{}).buy_max || 0;
+  var sellVol = (w['7d']||{}).volume || 0;
+  var buyVol = (w['7d']||{}).volume || 0;
+  var d7sell_med = 0;
   var spread = sellMin - buyMax, spPct = buyMax > 0 ? (spread/buyMax*100) : 0;
   var d7 = w['7d']||{}, d90 = w['90d']||{}, d7avg = d7.avg||0, d90avg = d90.avg||0, diff = d7avg>0&&d90avg>0 ? d7avg-d90avg : 0;
   var winOrder = ['24h','3d','7d','30d','90d'], winLabel = {'24h':'24h','3d':'3d','7d':'7d','30d':'30d','90d':'90d'};
@@ -159,11 +198,12 @@ function renderResult(price, calc) {
     histRows += '<tr><td>'+winLabel[winOrder[i]]+'</td><td class="text-right">'+fmt(d.avg)+'</td><td class="text-right">'+fmtV(d.volume)+'</td></tr>';
   }
   var watchBtn = '';
-  if (typeof authToken !== 'undefined' && authToken) watchBtn = '<button class="watch-btn" onclick="toggleWatch('+price.type_id+',\''+price.name_cn.replace(/'/g,"\\'")+'\')" id="watchBtn">+ 关注</button>';
+  var loggedIn = document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in');
+  if (loggedIn) watchBtn = '<button class="watch-btn" onclick="toggleWatch('+price.type_id+',\''+price.name_cn.replace(/'/g,"\\'")+'\')" id="watchBtn">+ 关注</button>';
   area.innerHTML = '<div class="result-header"><h2>'+price.name_cn+' ('+price.name_en+')</h2><div><span class="quality-badge quality-complete">#'+price.type_id+'</span>'+watchBtn+'</div></div>'+
     '<div class="market-quote"><div class="quote-grid">'+
-    '<div class="quote-card sell"><div class="qlabel">最低卖单价 <span style="font-size:10px;color:#484f58">(去极值)</span></div><div class="qval">'+fmt(sellMin)+'</div><div class="qvol">量 '+fmtV(sellVol)+' | 权均 '+fmtShort(trimmedSell.avg||0)+' | 中位 '+fmtShort(trimmedSell.median||0)+'</div></div>'+
-    '<div class="quote-card buy"><div class="qlabel">最高买单价 <span style="font-size:10px;color:#484f58">(去极值)</span></div><div class="qval">'+fmt(buyMax)+'</div><div class="qvol">量 '+fmtV(buyVol)+' | 权均 '+fmtShort(trimmedBuy.avg||0)+' | 中位 '+fmtShort(trimmedBuy.median||0)+'</div></div>'+
+    '<div class="quote-card sell"><div class="qlabel">最低卖单价</div><div class="qval">'+fmt(sellMin)+'</div><div class="qvol">量 '+fmtV(sellVol)+'</div></div>'+
+    '<div class="quote-card buy"><div class="qlabel">最高买单价</div><div class="qval">'+fmt(buyMax)+'</div><div class="qvol">量 '+fmtV(buyVol)+'</div></div>'+
     '<div class="quote-card '+(spread<=0?'negative':'')+'"><div class="qlabel">买卖价差</div><div class="qval">'+fmt(spread)+'</div><div class="qvol">'+spPct.toFixed(2)+'%</div></div>'+
     '<div class="quote-card"><div class="qlabel">7日去极值加权均价</div><div class="qval">'+fmt(d7avg)+'</div><div class="qvol">'+(diff>0?'📈 +':(diff<0?'📉 ':'➡ '))+fmt(Math.abs(diff))+' (7d-90d)</div></div>'+
     '</div></div>'+
@@ -196,15 +236,20 @@ function renderProfit(calc) {
   var ideal = calc.modes[0] || {};
   var matRows = '';
   for (var i = 0; i < calc.materials.length; i++) {
-    var m = calc.materials[i]; var flag = m.has_price ? '' : ' [nodata]';
-    matRows += '<tr><td>'+m.name+flag+'</td><td class="text-right">'+m.quantity.toLocaleString()+'</td><td class="text-right">'+fmt(m.buy_price)+'</td><td class="text-right">'+fmt(m.sell_price)+'</td>'+
+    var m = calc.materials[i];
+    var ratio = m.ratio || 1.0;
+    matRows += '<tr><td>'+m.name+(m.has_price?'':' [nodata]')+'</td><td class="text-right">'+m.quantity.toLocaleString()+'</td><td class="text-right">'+fmt(m.buy_price)+'</td><td class="text-right">'+fmt(m.sell_price)+'</td><td class="text-right">'+fmt(m.buy_price*m.quantity)+'</td><td class="text-right">'+fmt(m.sell_price*m.quantity)+'</td>'+
       '<td class="text-center"><select id="mat-mode-'+m.type_id+'" class="mat-mode-select" onchange="overrideMaterial('+m.type_id+',this.value)"'+(m.has_price?'':' disabled')+'>'+
       '<option value="buy"'+(m.default_pricing_mode==='buy'?' selected':'')+'>收单</option>'+
       '<option value="sell"'+(m.default_pricing_mode==='sell'?' selected':'')+'>卖单</option>'+
-      '<option value="self"'+(m.default_pricing_mode==='self'?' selected':'')+'>自产</option></select></td></tr>';
+      '<option value="self"'+(m.default_pricing_mode==='self'?' selected':'')+'>自产</option></select></td>'+
+      '<td class="text-center"><select id="mat-ratio-'+m.type_id+'" class="mat-mode-select" onchange="recalcWithRatios()">'+
+      [100,95,90,85,80].map(function(v){ return '<option value="'+(v/100)+'"'+(Math.abs(ratio-(v/100))<0.01?' selected':'')+'>'+v+'%</option>'; }).join('')+
+      '</select></td></tr>';
   }
   var bomBtn = (calc.deep_bom && calc.deep_bom.length) ? '<button id="deepBomBtn" class="bom-toggle" onclick="toggleDeepBom()" style="margin-right:8px">'+(bomActive?'收起基础材料':'展开基础材料')+'</button>' : '';
-  var saveBtn = (typeof authToken !== 'undefined' && authToken) ? '<button class="save-overrides-btn" onclick="saveOverrides()">保存配置</button>' : '';
+  var loggedIn = document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in');
+  var saveBtn = loggedIn ? '<button class="save-overrides-btn" onclick="saveOverrides()">保存配置</button>' : '';
   var actionRow = (bomBtn || saveBtn) ? '<div style="display:flex;gap:8px;align-items:center;margin:8px 0">'+bomBtn+saveBtn+'</div>' : '';
   section.innerHTML = '<div class="profit-section"><h3>利润计算</h3><div class="mode-grid">'+modeCards+'</div>'+
     '<div class="cost-breakdown"><h4>成本分项</h4>'+
@@ -214,13 +259,16 @@ function renderProfit(calc) {
     '<div class="breakdown-row"><span>设施税</span><span>'+fmt(ideal.facility_tax)+'</span></div>'+
     '<div class="breakdown-row total"><span>总制造费用</span><span>'+fmt(ideal.total_cost)+'</span></div></div>'+
     actionRow +
-    '<div class="materials-table" style="display:'+(bomActive?'none':'block')+'"><h4>蓝图材料清单</h4><table><thead><tr><th>材料</th><th class="text-right">数量</th><th class="text-right">收单价</th><th class="text-right">卖单价</th><th class="text-center">定价</th></tr></thead><tbody>'+matRows+'</tbody></table></div>'+
+    '<div class="materials-table" style="display:'+(bomActive?'none':'block')+'"><h4>蓝图材料清单</h4><table><thead><tr><th>材料</th><th class="text-right">数量</th><th class="text-right">收单价</th><th class="text-right">卖单价</th><th class="text-right">收单总价</th><th class="text-right">卖单总价</th><th class="text-center">定价</th><th class="text-center">比率</th></tr></thead><tbody>'+matRows+'</tbody></table></div>'+
     '<div id="deepBomContainer" class="deep-bom" style="display:'+(bomActive?'block':'none')+'"><h4>基础材料清单</h4>'+
-    (calc.deep_bom && calc.deep_bom.length ? '<table><thead><tr><th>材料</th><th class="text-right">总数量</th><th class="text-right">收单价</th><th class="text-right">卖单价</th><th class="text-right">收单总价</th><th class="text-right">卖单总价</th><th class="text-center">类型</th><th class="text-center">定价</th></tr></thead><tbody>'+
+    (calc.deep_bom && calc.deep_bom.length ? '<table><thead><tr><th>材料</th><th class="text-right">总数量</th><th class="text-right">收单价</th><th class="text-right">卖单价</th><th class="text-right">收单总价</th><th class="text-right">卖单总价</th><th class="text-center">类型</th><th class="text-center">定价</th><th class="text-center">比率</th></tr></thead><tbody>'+
       calc.deep_bom.map(function(m){
-        var matInfo = (calc.materials||[]).find(function(x){ return x.type_id === m.type_id; }) || {};
-        var mode = matInfo.default_pricing_mode || 'sell';
-        return '<tr><td>'+m.name+'</td><td class="text-right">'+m.total_quantity.toLocaleString()+'</td><td class="text-right">'+fmt(m.buy_price)+'</td><td class="text-right">'+fmt(m.sell_price)+'</td><td class="text-right">'+fmt(m.total_buy_cost)+'</td><td class="text-right">'+fmt(m.total_sell_cost)+'</td><td class="text-center" style="font-size:11px;color:#8b949e">'+(m.is_base_mineral?'基础矿物':(m.is_terminal?'终端物料':'中间材料'))+'</td><td class="text-center"><select id="mat-mode-'+m.type_id+'" class="mat-mode-select" onchange="overrideMaterial('+m.type_id+',this.value)"><option value="buy"'+(mode==='buy'?' selected':'')+'>收单</option><option value="sell"'+(mode==='sell'?' selected':'')+'>卖单</option><option value="self"'+(mode==='self'?' selected':'')+'>自产</option></select></td></tr>';
+        var mi = (calc.materials||[]).find(function(x){ return x.type_id === m.type_id; }) || {};
+        var mode = mi.default_pricing_mode || 'sell';
+        var ratio = mi.ratio || 1.0;
+        return '<tr><td>'+m.name+'</td><td class="text-right">'+m.total_quantity.toLocaleString()+'</td><td class="text-right">'+fmt(m.buy_price)+'</td><td class="text-right">'+fmt(m.sell_price)+'</td><td class="text-right">'+fmt(m.total_buy_cost)+'</td><td class="text-right">'+fmt(m.total_sell_cost)+'</td><td class="text-center" style="font-size:11px;color:#8b949e">'+(m.is_base_mineral?'基础矿物':(m.is_terminal?'终端物料':'中间材料'))+'</td><td class="text-center"><select id="mat-mode-'+m.type_id+'" class="mat-mode-select" onchange="overrideMaterial('+m.type_id+',this.value)"><option value="buy"'+(mode==='buy'?' selected':'')+'>收单</option><option value="sell"'+(mode==='sell'?' selected':'')+'>卖单</option><option value="self"'+(mode==='self'?' selected':'')+'>自产</option></select></td><td class="text-center"><select id="mat-ratio-'+m.type_id+'" class="mat-mode-select" onchange="recalcWithRatios()">'+
+        [100,95,90,85,80].map(function(v){ return '<option value="'+(v/100)+'"'+(Math.abs(ratio-(v/100))<0.01?' selected':'')+'>'+v+'%</option>'; }).join('')+
+        '</select></td></tr>';
       }).join('')+'</tbody></table>' : '')+
     '</div></div>';
 }
@@ -233,31 +281,28 @@ function toggleDeepBom() {
 }
 
 async function saveOverrides() {
-  if (!authToken || !lastCalcData || !selectedTypeId) { if (typeof showLogin==='function') showLogin(); return; }
+  if (!window.authToken || !lastCalcData || !selectedTypeId) { if (typeof showLogin==='function') showLogin(); return; }
   var ov = {};
   var list = bomActive && lastCalcData.deep_bom ? lastCalcData.deep_bom : lastCalcData.materials;
   for (var i = 0; i < list.length; i++) { var el = document.getElementById('mat-mode-'+list[i].type_id); if (el) ov[list[i].type_id] = el.value; }
-  // 同时保存配置参数
   var cfg = getCfg();
   ov['_config'] = {sci: cfg.sci, bonus: cfg.bonus, tax: cfg.tax, me: cfg.me, te: cfg.te, bom: bomActive};
   try {
-    var r = await fetch('/api/save-overrides?type_id='+selectedTypeId+'&overrides='+encodeURIComponent(JSON.stringify(ov)), { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} });
+    var r = await fetch('/api/save-overrides?type_id='+selectedTypeId+'&overrides='+encodeURIComponent(JSON.stringify(ov)), { method: 'POST', headers: {'Authorization': 'Bearer '+window.authToken} });
     var d = await r.json();
     if (d.ok) alert('配置已保存');
   } catch(e) { alert('保存失败'); }
 }
 
 async function loadOverrides() {
-  if (!authToken || !selectedTypeId) return;
+  if (!window.authToken || !selectedTypeId) return;
   try {
-    var r = await fetch('/api/load-overrides?type_id='+selectedTypeId, { headers: {'Authorization': 'Bearer '+authToken} });
+    var r = await fetch('/api/load-overrides?type_id='+selectedTypeId, { headers: {'Authorization': 'Bearer '+window.authToken} });
     var d = await r.json();
     if (d.ok && d.overrides) {
       var cfg = getCfg();
-      // 提取配置参数
       var config = d.overrides['_config'] || {};
       delete d.overrides['_config'];
-      // 应用保存的配置
       if (config.sci !== undefined) { document.getElementById('cfgSci').value = (config.sci*100).toFixed(1); }
       if (config.bonus !== undefined) { document.getElementById('cfgBonus').value = (config.bonus*100).toFixed(1); }
       if (config.tax !== undefined) { document.getElementById('cfgTax').value = (config.tax*100).toFixed(1); }

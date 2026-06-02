@@ -24,7 +24,9 @@ async function checkLogin() {
 }
 
 function showLogin() {
-  if (authToken) {
+  var tk = localStorage.getItem('auth_token');
+  if (tk && tk !== 'null' && tk.length > 0) {
+    authToken = tk;
     var m = document.getElementById('userMenu');
     if (m) { m.style.display = m.style.display==='block'?'none':'block'; return; }
     showUserMenu(); return;
@@ -131,8 +133,9 @@ function showRanking() {
   if (!authToken) { showLogin(); return; }
   var area = document.getElementById('pageRanking');
   if (!area) return;
-  area.innerHTML = '<div class="ranking-page"><h3>\u5229\u6da6\u6392\u884c</h3><div class="ranking-header"><select id="rankMode" class="rank-select" onchange="onRankModeChange()"><option value="watchlist">\u6211\u7684\u5173\u6ce8</option><option value="category">\u6309\u5206\u7c7b\u626b\u63cf</option></select><span id="rankCategoryWrap" style="display:none"><select id="rankCategory" class="rank-select"></select></span></div><div class="profit-tabs"><button class="profit-tab active" onclick="switchProfitTab(event,\'flip\')">\u5012\u5356\u5229\u6da6</button><button class="profit-tab" onclick="switchProfitTab(event,\'realistic\')">\u84dd\u56fe\u6750\u6599\u5229\u6da6</button><button class="profit-tab" onclick="switchProfitTab(event,\'ideal\')">\u57fa\u7840\u6750\u6599\u5229\u6da6</button><button class="profit-tab" onclick="switchProfitTab(event,\'conservative\')">\u4fdd\u5b88\u5229\u6da6</button></div><div id="rankContent"><div class="loading">\u52a0\u8f7d\u4e2d...</div></div></div>';
+  area.innerHTML = '<div class="ranking-page"><h3>\u5229\u6da6\u6392\u884c</h3><div class="ranking-header"><select id="rankMode" class="rank-select" onchange="onRankModeChange()"><option value="watchlist">\u6211\u7684\u5173\u6ce8</option><option value="category">\u6309\u5206\u7c7b\u626b\u63cf</option></select><span id="rankCategoryWrap" style="display:none"><select id="rankCategory" class="rank-select"></select></span><span id="discountWrap" style="display:none;margin-left:8px">\u6279\u53d1\u6298\u6263 <select id="discountSel" class="rank-select" onchange="loadRanking()"><option value="1.0">100%</option><option value="0.95">95%</option><option value="0.9" selected>90%</option><option value="0.85">85%</option><option value="0.8">80%</option></select><button class="save-overrides-btn" onclick="saveDiscount()" style="margin-left:6px">\u4fdd\u5b58</button></span></div><div class="profit-tabs"><button class="profit-tab active" onclick="switchProfitTab(event,\'flip\')">\u5012\u5356\u5229\u6da6</button><button class="profit-tab" onclick="switchProfitTab(event,\'realistic\')">\u84dd\u56fe\u96f6\u552e</button><button class="profit-tab" onclick="switchProfitTab(event,\'ideal\')">\u57fa\u7840\u96f6\u552e</button><button class="profit-tab" onclick="switchProfitTab(event,\'conservative\')">\u6536\u5355</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bp\')">\u84dd\u56fe\u6279\u53d1</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bm\')">\u57fa\u7840\u6279\u53d1</button></div><div id="rankContent"><div class="loading">\u52a0\u8f7d\u4e2d...</div></div></div>';
   setTimeout(function(){ loadRanking(); }, 100);
+  setTimeout(function(){ if (typeof loadDiscount === 'function') loadDiscount(); }, 200);
 }
 
 function switchProfitTab(ev, tab) {
@@ -140,6 +143,9 @@ function switchProfitTab(ev, tab) {
   var btns = document.querySelectorAll('.profit-tab');
   for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
   ev.target.classList.add('active');
+  // 批发利润标签时显示折扣下拉
+  var dw = document.getElementById('discountWrap');
+  if (dw) dw.style.display = (tab.indexOf('wholesale') === 0 && document.getElementById('rankMode').value === 'watchlist') ? 'inline-block' : 'none';
   renderRankingTable();
 }
 
@@ -215,7 +221,7 @@ async function loadRanking(refresh) {
     if (!gid) { el.innerHTML = '<div class="no-result">\u8bf7\u9009\u62e9\u5206\u7c7b</div>'; return; }
     url = '/api/ranking/category?group_id=' + gid;
   } else {
-    url = '/api/ranking/watchlist';
+    url = '/api/ranking/watchlist?discount=' + (document.getElementById('discountSel') ? document.getElementById('discountSel').value : 0.9);
   }
   try {
     var r = await fetch(url, { headers: {'Authorization': 'Bearer '+authToken} });
@@ -242,6 +248,23 @@ async function unwatchItem(typeId) {
 
 async function watchFromRanking(typeId, name) {
   try { var r = await fetch('/api/watchlist/add?type_id='+typeId+'&name='+encodeURIComponent(name), { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }); var d = await r.json(); if (d.ok) loadRanking(true); } catch(e) {}
+}
+
+async function saveDiscount() {
+  var sel = document.getElementById('discountSel');
+  if (!sel) return;
+  try { await fetch('/api/save-setting?key=wholesale_discount&value='+sel.value, { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }); alert('\u4fdd\u5b58\u6210\u529f'); } catch(e) {}
+}
+
+async function loadDiscount() {
+  try {
+    var r = await fetch('/api/load-setting?key=wholesale_discount&default=0.9', { headers: {'Authorization': 'Bearer '+authToken} });
+    var d = await r.json();
+    if (d.ok && d.value) {
+      var sel = document.getElementById('discountSel');
+      if (sel) { sel.value = d.value; loadRanking(); }
+    }
+  } catch(e) {}
 }
 
 async function updateSDE() {
