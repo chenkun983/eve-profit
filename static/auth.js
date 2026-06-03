@@ -127,7 +127,10 @@ function showAdmin() {
     if (!d.ok) { area.innerHTML = '<div class="no-result">\u65e0\u6743\u9650</div>'; return; }
     var h = '<div id="sdeInfo" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">加载 SDE 信息...</div></div>'+
       '<h4 style="margin-bottom:8px">会员管理</h4><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>管理员</th><th>注册时间</th></tr></thead><tbody>';
-    for (var i = 0; i < d.users.length; i++) { var u = d.users[i]; h += '<tr><td>'+u.id+'</td><td>'+u.username+'</td><td>'+(u.email||'-')+'</td><td>'+(u.is_admin?'是':'<span class="watch-btn-sm" onclick="setAdmin('+u.id+')">设为管理员</span>')+'</td><td>'+u.created_at+'</td></tr>'; }
+    for (var i = 0; i < d.users.length; i++) { var u = d.users[i]; 
+      var regTime = u.created_at;
+      if (regTime) { try { var dt = new Date(regTime.replace(' ','T')+'Z'); dt.setHours(dt.getHours()+8); regTime = dt.toISOString().replace('T',' ').substring(0,19); } catch(e) {} }
+      h += '<tr><td>'+u.id+'</td><td>'+u.username+'</td><td>'+(u.email||'-')+'</td><td>'+(u.is_admin?'是':'<span class="watch-btn-sm" onclick="setAdmin('+u.id+')">设为管理员</span>')+'</td><td>'+regTime+'</td></tr>'; }
     h += '</tbody></table></div>';
     area.innerHTML = h;
     // 加载 SDE 版本信息
