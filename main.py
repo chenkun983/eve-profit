@@ -355,6 +355,20 @@ async def api_admin_users(authorization: str = Header(None)):
         raise HTTPException(403, "仅管理员可查看")
     return {"ok": True, "users": list_users()}
 
+@app.get("/api/admin/sde-info")
+async def api_sde_info(authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可查看")
+    info = db.get_sde_version()
+    import requests as _req
+    latest = "未知"
+    try:
+        r = _req.get("https://api.github.com/repos/garveen/eve-sde-converter/releases/latest",
+                     headers={"Accept": "application/vnd.github+json"}, timeout=10)
+        if r.status_code == 200: latest = r.json()["tag_name"]
+    except: pass
+    return {"ok": True, "current": info, "latest_version": latest}
 
 @app.post("/api/save-setting")
 async def api_save_setting(key: str = Query(...), value: str = Query(""),

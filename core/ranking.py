@@ -13,31 +13,35 @@ def batch_get_prices(type_ids):
     for i in range(0, len(type_ids), 100):
         batch = type_ids[i:i+100]
         try:
-            resp = requests.get("https://www.ceve-market.org/api/marketstat",
-                params=[('typeid', t) for t in batch] + [('usesystem', 30000142)], timeout=30)
+            resp = requests.get("https://www.ceve-market.org/api/marketstat", params=[('typeid',t) for t in batch]+[('usesystem',30000142)], timeout=30)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.text)
                 for m in root.findall('.//type'):
                     tid = int(m.attrib['id'])
-                    def _ext(el_name):
-                        el = m.find(el_name)
-                        if el is None: return {}
-                        return {'median': float(el.find('median').text) if el.find('median') is not None else 0,
-                                'min': float(el.find('min').text) if el.find('min') is not None else 0,
-                                'max': float(el.find('max').text) if el.find('max') is not None else 0,
-                                'volume': int(el.find('volume').text) if el.find('volume') is not None else 0}
+                    def _ext(el):
+                        e = m.find(el)
+                        if e is None: return {}
+                        return {'median':float(e.find('median').text) if e.find('median') is not None else 0,
+                                'min':float(e.find('min').text) if e.find('min') is not None else 0,
+                                'max':float(e.find('max').text) if e.find('max') is not None else 0,'volume':int(e.find('volume').text) if e.find('volume') is not None else 0}
                     b = _ext('buy'); s = _ext('sell')
-                    result[tid] = {'buy_median': b.get('median',0), 'sell_median': s.get('median',0),
-                                   'buy_max': b.get('max',0), 'sell_min': s.get('min',0)}
-        except: continue
+                    result[tid] = {'buy_median':b.get('median',0),'sell_median':s.get('median',0),'buy_max':b.get('max',0),'sell_min':s.get('min',0)}
+        except: pass
     return result
 
 def _prices_to_mock(raw):
     r = {}
     for pid, p in raw.items():
-        r[pid] = {'buy': p.get('buy_median',0), 'sell': p.get('sell_median',0),
-                  'sell_min': p.get('sell_min',0), 'buy_volume': 0, 'sell_volume': 0}
+        r[pid] = {'buy':p.get('buy_median',0),'sell':p.get('sell_median',0),'sell_min':p.get('sell_min',0),'buy_max':p.get('buy_max',0),'buy_volume':0,'sell_volume':0}
     return r
+
+def _fill_modes(r, idata):
+    if not r: return
+    for m in r['modes']:
+        cp = m['total_cost'] / r['product_quantity'] if r['product_quantity'] > 0 else 0
+        idata[m['key']] = {'profit':m['profit'],'margin':m['profit_margin'],'isk_hour':m['isk_per_hour'],
+            'profit_24h':m['profit_24h'],'cost':m['total_cost'],'revenue':m['revenue'],
+            'quality':m['data_quality'],'sell_price':m['product_price'],'cost_price':round(cp,2)}
 
 def scan_category(group_id):
     items = db_sde.get_items_by_market_group(group_id)
@@ -49,35 +53,30 @@ def scan_category(group_id):
         try:
             bom = ProfitCalculator(db_sde, market_api).resolve_deep_bom_flat(item['typeID'])
             all_ids.update(b['type_id'] for b in bom)
-        except: continue
+        except: pass
     raw_prices = batch_get_prices(list(all_ids))
     prices = _prices_to_mock(raw_prices)
-    result = []; broker_fee = 0.0075; sales_tax = 0.01
+    result = []; bfee = 0.0075; stax = 0.01
     for item in items:
         tid = item['typeID']; p = prices.get(tid, {})
-        sell_min = p.get('sell',0); buy_max = p.get('buy',0)
-        buy_med = p.get('buy',0); sell_med = p.get('sell',0)
-        if sell_min == 0 and buy_max == 0: continue
-        buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
-        sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
-        flip_profit = round(sell_revenue - buy_cost, 2) if buy_cost > 0 and sell_revenue > 0 else 0
-        flip_margin = round((sell_revenue - buy_cost) / buy_cost * 100, 1) if buy_cost > 0 and sell_revenue > buy_cost else 0
-        item_data = {'type_id': tid, 'name': item.get('name') or db_sde.get_chinese_name(tid),
-            'name_en': item.get('name_en') or db_sde.get_english_name(tid),
-            'flip_profit': flip_profit, 'flip_margin': flip_margin,
-            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None, 'wholesale': None}
+        sm = p.get('sell',0); bm = p.get('buy',0)
+        if sm == 0 and bm == 0: continue
+        bc = bm * (1 + bfee) if bm > 0 else 0
+        sr = sm * (1 - bfee - stax) if sm > 0 else 0
+        fp = round(sr - bc, 2) if bc > 0 and sr > 0 else 0
+        fm = round((sr - bc) / bc * 100, 1) if bc > 0 and sr > bc else 0
+        idata = {'type_id':tid, 'name':item.get('name') or db_sde.get_chinese_name(tid),
+            'name_en':item.get('name_en') or db_sde.get_english_name(tid),
+            'flip_profit':fp, 'flip_margin':fm, 'flip_sell_price':sm, 'flip_cost_price':bc,
+            'has_blueprint':False,
+            'realistic':None, 'ideal':None, 'conservative':None, 'wholesale_bp':None, 'wholesale_bm':None}
         mats = db_sde.get_manufacturing_materials(tid)
         if mats:
-            item_data['has_blueprint'] = True
+            idata['has_blueprint'] = True
             calc = ProfitCalculator(db_sde, market_api, ManufacturingConfig())
             calc.market.get_prices_batch = lambda ids, s=30000142: prices
-            r = calc.calculate_with_modes(tid)
-            if r:
-                for m in r['modes']:
-                    item_data[m['key']] = {'profit': m['profit'], 'margin': m['profit_margin'],
-                        'isk_hour': m['isk_per_hour'], 'profit_24h': m['profit_24h'],
-                        'cost': m['total_cost'], 'revenue': m['revenue'], 'quality': m['data_quality']}
-        result.append(item_data)
+            _fill_modes(calc.calculate_with_modes(tid), idata)
+        result.append(idata)
     result.sort(key=lambda x: max(x['realistic']['profit'] if x['realistic'] else 0, x['flip_profit']), reverse=True)
     return result
 
@@ -91,33 +90,29 @@ def scan_watchlist(user_id, discount=0.9):
         try:
             bom = ProfitCalculator(db_sde, market_api).resolve_deep_bom_flat(w['type_id'])
             all_ids.update(b['type_id'] for b in bom)
-        except: continue
+        except: pass
     raw_prices = batch_get_prices(list(all_ids))
     prices = _prices_to_mock(raw_prices)
-    result = []; broker_fee = 0.0075; sales_tax = 0.01
+    result = []; bfee = 0.0075; stax = 0.01
     for item in watch:
         tid = item['type_id']; p = prices.get(tid, {})
-        buy_med = p.get('buy',0); sell_med = p.get('sell',0)
-        buy_cost = buy_med * (1 + broker_fee) if buy_med > 0 else 0
-        sell_revenue = sell_med * (1 - broker_fee - sales_tax) if sell_med > 0 else 0
-        flip_profit = round(sell_revenue - buy_cost, 2) if buy_med > 0 and sell_med > 0 else 0
-        flip_margin = round((sell_revenue - buy_cost) / buy_cost * 100, 1) if buy_cost > 0 and sell_revenue > buy_cost else 0
-        item_data = {'type_id': tid, 'name': item.get('name_cn') or db_sde.get_chinese_name(tid),
-            'name_en': db_sde.get_english_name(tid),
-            'flip_profit': flip_profit, 'flip_margin': flip_margin,
-            'has_blueprint': False, 'ideal': None, 'realistic': None, 'conservative': None, 'wholesale': None}
+        bm = p.get('buy',0); sm = p.get('sell',0)
+        bc = bm * (1 + bfee) if bm > 0 else 0
+        sr = sm * (1 - bfee - stax) if sm > 0 else 0
+        fp = round(sr - bc, 2) if bm > 0 and sm > 0 else 0
+        fm = round((sr - bc) / bc * 100, 1) if bc > 0 and sr > bc else 0
+        idata = {'type_id':tid, 'name':item.get('name_cn') or db_sde.get_chinese_name(tid),
+            'name_en':db_sde.get_english_name(tid),
+            'flip_profit':fp, 'flip_margin':fm, 'flip_sell_price':sm, 'flip_cost_price':bc,
+            'has_blueprint':False,
+            'realistic':None, 'ideal':None, 'conservative':None, 'wholesale_bp':None, 'wholesale_bm':None}
         mats = db_sde.get_manufacturing_materials(tid)
         if mats:
-            item_data['has_blueprint'] = True
+            idata['has_blueprint'] = True
             saved = auth.load_material_overrides(user_id, tid)
             calc = ProfitCalculator(db_sde, market_api, ManufacturingConfig(wholesale_discount=discount))
             calc.market.get_prices_batch = lambda ids, s=30000142: prices
-            r = calc.calculate_with_modes(tid, material_overrides=saved)
-            if r:
-                for m in r['modes']:
-                    item_data[m['key']] = {'profit': m['profit'], 'margin': m['profit_margin'],
-                        'isk_hour': m['isk_per_hour'], 'profit_24h': m['profit_24h'],
-                        'cost': m['total_cost'], 'revenue': m['revenue'], 'quality': m['data_quality']}
-        result.append(item_data)
+            _fill_modes(calc.calculate_with_modes(tid, material_overrides=saved), idata)
+        result.append(idata)
     result.sort(key=lambda x: max(x['realistic']['profit'] if x['realistic'] else 0, x['flip_profit']), reverse=True)
     return result

@@ -115,17 +115,33 @@ function doChangePwd() {
 
 function showAdmin() {
   hideUserMenu();
-  // 切换到排行标签页，把内容替换成管理后台
-  switchTab('ranking');
+  // 直接显示管理后台，不走 switchTab（避免触发 showRanking）
+  document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
+  document.getElementById('sidebar').style.display = 'none';
+  document.getElementById('pageCategories').style.display = 'none';
+  document.getElementById('pageRanking').style.display = 'block';
   var area = document.getElementById('pageRanking');
   area.style.display = 'block';
   area.innerHTML = '<h3 style="margin-bottom:12px">\u7ba1\u7406\u540e\u53f0</h3><div class="loading">\u52a0\u8f7d\u4e2d...</div>';
   fetch('/api/admin/users', { headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
     if (!d.ok) { area.innerHTML = '<div class="no-result">\u65e0\u6743\u9650</div>'; return; }
-    var h = '<h3 style="margin-bottom:12px">\u7ba1\u7406\u540e\u53f0 - \u4f1a\u5458\u7ba1\u7406</h3><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>ID</th><th>\u7528\u6237\u540d</th><th>\u90ae\u7bb1</th><th>\u7ba1\u7406\u5458</th><th>\u6ce8\u518c\u65f6\u95f4</th></tr></thead><tbody>';
-    for (var i = 0; i < d.users.length; i++) { var u = d.users[i]; h += '<tr><td>'+u.id+'</td><td>'+u.username+'</td><td>'+(u.email||'-')+'</td><td>'+(u.is_admin?'\u662f':'<span class="watch-btn-sm" onclick="setAdmin('+u.id+')">\u8bbe\u4e3a\u7ba1\u7406\u5458</span>')+'</td><td>'+u.created_at+'</td></tr>'; }
+    var h = '<div id="sdeInfo" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">加载 SDE 信息...</div></div>'+
+      '<h4 style="margin-bottom:8px">会员管理</h4><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>管理员</th><th>注册时间</th></tr></thead><tbody>';
+    for (var i = 0; i < d.users.length; i++) { var u = d.users[i]; h += '<tr><td>'+u.id+'</td><td>'+u.username+'</td><td>'+(u.email||'-')+'</td><td>'+(u.is_admin?'是':'<span class="watch-btn-sm" onclick="setAdmin('+u.id+')">设为管理员</span>')+'</td><td>'+u.created_at+'</td></tr>'; }
     h += '</tbody></table></div>';
     area.innerHTML = h;
+    // 加载 SDE 版本信息
+    fetch('/api/admin/sde-info', { headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
+      var el = document.getElementById('sdeInfo');
+      if (!el || !d.ok) return;
+      var c = d.current || {};
+      el.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
+        '<div><strong>SDE 当前版本</strong><br><span style="color:#8b949e;font-size:13px">'+c.size_mb+'MB | '+c.blueprints+' 个蓝图 | '+c.items+' 个物品</span></div>'+
+        '<div><strong>GitHub 最新</strong><br><span style="color:#8b949e;font-size:13px">'+d.latest_version+'</span></div></div>';
+      if (d.current && d.latest_version && d.current.version !== d.latest_version) {
+        el.innerHTML += '<div style="margin-top:8px"><button class="save-overrides-btn" onclick="updateSDE()">更新 SDE</button></div>';
+      }
+    });
   });
 }
 
@@ -168,15 +184,23 @@ function renderRankingTable() {
     var va = sortField==='profit'?a.profit:a.margin, vb = sortField==='profit'?b.profit:b.margin;
     return sortAsc ? va-vb : vb-va;
   });
-  var html = '<div style="font-size:12px;color:#484f58;margin-bottom:8px">\u5171 '+rankData.length+' \u4ef6</div><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>#</th><th>\u7269\u54c1</th><th class="text-right" onclick="toggleSort(\'profit\')" style="cursor:pointer">\u5229\u6da6 '+(sortField==='profit'?(sortAsc?'\u25b2':'\u25bc'):'')+'</th><th class="text-right" onclick="toggleSort(\'margin\')" style="cursor:pointer">\u5229\u6da6\u7387 '+(sortField==='margin'?(sortAsc?'\u25b2':'\u25bc'):'')+'</th>'+(currentProfitTab==='flip'?'':'<th class="text-right">24h\u5229\u6da6</th>')+'<th>\u7c7b\u578b</th><th></th></tr></thead><tbody>';
+  var html = '<div style="font-size:12px;color:#484f58;margin-bottom:8px">共 '+rankData.length+' 件</div><div style="overflow-x:auto"><table class="ranking-table"><thead><tr><th>#</th><th>物品</th><th class="text-right">售价</th><th class="text-right">成本价</th><th class="text-right" onclick="toggleSort(\'profit\')" style="cursor:pointer">利润 '+(sortField==='profit'?(sortAsc?'▲':'▼'):'')+'</th><th class="text-right" onclick="toggleSort(\'margin\')" style="cursor:pointer">利润率 '+(sortField==='margin'?(sortAsc?'▲':'▼'):'')+'</th>'+(currentProfitTab==='flip'?'':'<th class="text-right">24h利润</th>')+'<th>类型</th><th></th></tr></thead><tbody>';
   for (var i = 0; i < data.length; i++) {
     var item = data[i].item, profit = data[i].profit, margin = data[i].margin;
     var pc = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : '');
     var pro24 = (currentProfitTab !== 'flip' && item[currentProfitTab]) ? item[currentProfitTab].profit_24h||0 : 0;
+    var sellPrice = 0, costPrice = 0;
+    if (currentProfitTab === 'flip') { sellPrice = item.flip_sell_price||0; costPrice = item.flip_cost_price||0; }
+    else if (item[currentProfitTab]) { sellPrice = item[currentProfitTab].sell_price||0; costPrice = item[currentProfitTab].cost_price||0; }
     var mEl = document.getElementById('rankMode');
     var isWL = mEl && mEl.value === 'watchlist';
+    var isWS = currentProfitTab.indexOf('wholesale') === 0;
     var name = item.name.replace(/'/g, "\\'");
-    html += '<tr onclick="selectItem('+item.type_id+',\''+name+'\')" style="cursor:pointer"><td><span class="rank-num">'+(i+1)+'</span></td><td>'+item.name.replace(/\\"/g,'"')+'</td><td class="text-right '+pc+'">'+fmt(profit)+'</td><td class="text-right '+pc+'">'+margin.toFixed(1)+'%</td>'+(currentProfitTab==='flip'?'':'<td class="text-right '+pc+'">'+fmt(pro24)+'</td>')+'<td style="font-size:11px;color:#8b949e">'+(item.has_blueprint?'\u5236\u9020':'\u5012\u5356')+'</td>'+(isWL?'<td style="text-align:center"><span class="unwatch-btn" onclick="event.stopPropagation();unwatchItem('+item.type_id+')">x</span></td>':'<td style="text-align:center"><span class="watch-btn-sm" onclick="event.stopPropagation();watchFromRanking('+item.type_id+',\''+item.name.replace(/'/g,"\\'")+'\')">+ \u5173\u6ce8</span></td>')+'</tr>';
+    html += '<tr onclick="selectItem('+item.type_id+',\''+name+'\')" style="cursor:pointer"><td><span class="rank-num">'+(i+1)+'</span></td><td>'+item.name.replace(/\\"/g,'"')+'</td><td class="text-right">'+fmt(sellPrice)+'</td><td class="text-right">'+fmt(costPrice)+'</td><td class="text-right '+pc+'">'+fmt(profit)+'</td><td class="text-right '+pc+'">'+margin.toFixed(1)+'%</td>'+(currentProfitTab==='flip'?'':'<td class="text-right '+pc+'">'+fmt(pro24)+'</td>')+'<td style="font-size:11px;color:#8b949e">'+(item.has_blueprint?'制造':'倒卖')+'</td>'+
+      (isWL && isWS ? '<td style="text-align:center"><span class="unwatch-btn" onclick="event.stopPropagation();unwatchItem('+item.type_id+')">x</span></td>' :
+      (isWL ? '<td style="text-align:center"><span class="unwatch-btn" onclick="event.stopPropagation();unwatchItem('+item.type_id+')">x</span></td>' :
+       '<td style="text-align:center"><span class="watch-btn-sm" onclick="event.stopPropagation();watchFromRanking('+item.type_id+',\''+item.name.replace(/'/g,"\\'")+'\')">+ 关注</span></td>'))+
+      '</tr>';
   }
   html += '</tbody></table></div>';
   el.innerHTML = html;
@@ -268,7 +292,8 @@ async function loadDiscount() {
 }
 
 async function updateSDE() {
-  var el = document.getElementById('rankContent');
-  el.innerHTML = '<div class="loading">\u6b63\u5728\u4e0b\u8f7d...</div>';
+  var el = document.getElementById('rankContent') || document.getElementById('sdeInfo');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">正在下载最新 SDE（需几分钟）...</div>';
   try { var r = await fetch('/api/sde/update', { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }); var d = await r.json(); el.innerHTML = '<p>'+(d.ok?'SDE \u66f4\u65b0\u5b8c\u6210':'SDE \u66f4\u65b0\u5931\u8d25')+'</p>'; if (d.ok) setTimeout(function(){ location.reload(); }, 1500); } catch(e) { el.innerHTML = '<p>\u8bf7\u6c42\u5931\u8d25</p>'; }
 }

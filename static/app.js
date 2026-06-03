@@ -133,13 +133,12 @@ async function fetchData(typeId, useBom) {
   area.innerHTML = '<div class="loading">正在拉取吉他市场数据...</div>';
   var cfg = getCfg();
   var calcUrl = '/api/calculate?type_id='+typeId+'&sci='+cfg.sci+'&bonus='+cfg.bonus+'&tax='+cfg.tax+'&me='+cfg.me+'&te='+cfg.te+(useBom ? '&bom=true' : '');
-  var [pRes, cRes] = await Promise.all([
-    fetch('/api/price?type_id='+typeId).catch(function(){return null}),
-    fetch(calcUrl).catch(function(){return null}),
-  ]);
-  var priceData = pRes ? await pRes.json() : null;
-  var calcData = cRes ? await cRes.json() : null;
-  if (!priceData || !priceData.ok) { area.innerHTML = '<div class="no-result">no price data</div>'; return; }
+  // 并行请求，各自容错
+  var p1 = fetch('/api/price?type_id='+typeId).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+  var p2 = fetch(calcUrl).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+  var results = await Promise.all([p1, p2]);
+  var priceData = results[0], calcData = results[1];
+  if (!priceData || !priceData.ok) { area.innerHTML = '<div class="no-result">无法获取市场价格</div>'; return; }
   lastCalcData = calcData && calcData.ok ? calcData.data : null;
   renderResult(priceData, lastCalcData);
   if (typeof loadOverrides === 'function') setTimeout(function(){ loadOverrides(); }, 500);
@@ -199,7 +198,7 @@ function renderResult(price, calc) {
     histRows += '<tr><td>'+winLabel[winOrder[i]]+'</td><td class="text-right">'+fmt(d.avg)+'</td><td class="text-right">'+fmtV(d.volume)+'</td></tr>';
   }
   var watchBtn = '';
-  var loggedIn = document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in');
+  var loggedIn = (document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in')) || window.authToken;
   if (loggedIn) watchBtn = '<button class="watch-btn" onclick="toggleWatch('+price.type_id+',\''+price.name_cn.replace(/'/g,"\\'")+'\')" id="watchBtn">+ 关注</button>';
   area.innerHTML = '<div class="result-header"><h2>'+price.name_cn+' ('+price.name_en+')</h2><div><span class="quality-badge quality-complete">#'+price.type_id+'</span>'+watchBtn+'</div></div>'+
     '<div class="market-quote"><div class="quote-grid">'+
@@ -249,7 +248,7 @@ function renderProfit(calc) {
       '</select></td></tr>';
   }
   var bomBtn = (calc.deep_bom && calc.deep_bom.length) ? '<button id="deepBomBtn" class="bom-toggle" onclick="toggleDeepBom()" style="margin-right:8px">'+(bomActive?'收起基础材料':'展开基础材料')+'</button>' : '';
-  var loggedIn = document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in');
+  var loggedIn = (document.getElementById('loginStatus') && document.getElementById('loginStatus').classList.contains('logged-in')) || window.authToken;
   var saveBtn = loggedIn ? '<button class="save-overrides-btn" onclick="saveOverrides()">保存配置</button>' : '';
   var actionRow = (bomBtn || saveBtn) ? '<div style="display:flex;gap:8px;align-items:center;margin:8px 0">'+bomBtn+saveBtn+'</div>' : '';
   section.innerHTML = '<div class="profit-section"><h3>利润计算</h3><div class="mode-grid">'+modeCards+'</div>'+
