@@ -428,7 +428,30 @@ async def github_webhook(request: Request, x_hub_signature_256: str = Header(Non
         "nohup venv/bin/python3 main.py > eve.log 2>&1 &"
     ])
 
-    return {"ok": True, "message": "部署中..."}
+    return {"ok": True, "message": "代码已拉取"}
+
+
+# ===================== 矿物估价 =====================
+
+@app.post("/api/estimate")
+async def api_estimate(reprocess_rate: float = Query(0.55, ge=0, le=1), text: str = Query("")):
+    from core.estimator import estimate_items, parse_input_text, parse_item_line
+    lines = text.strip().split('\n')
+    parsed = []
+    for line in lines:
+        items = parse_item_line(line)
+        for name, qty in items:
+            parsed.append({'name': name, 'quantity': qty})
+    if not parsed:
+        return {"ok": False, "message": "未识别到物品"}
+    results = estimate_items(parsed, reprocess_rate)
+    totals = {'direct_sell': 0, 'direct_buy': 0, 'mineral_sell': 0, 'mineral_buy': 0}
+    for r in results:
+        totals['direct_sell'] += r.get('direct_sell_total', 0)
+        totals['direct_buy'] += r.get('direct_buy_total', 0)
+        totals['mineral_sell'] += r.get('mineral_sell_total', 0)
+        totals['mineral_buy'] += r.get('mineral_buy_total', 0)
+    return {"ok": True, "results": results, "totals": totals}
 
 
 def from_cache(key):

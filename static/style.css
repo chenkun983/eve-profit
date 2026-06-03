@@ -76,6 +76,8 @@ header h1 { font-size: 22px; color: #58a6ff; }
 .save-overrides-btn { margin-left: 10px; padding: 3px 10px; border: 1px solid #1f6feb; border-radius: 4px; background: transparent; color: #58a6ff; font-size: 12px; cursor: pointer; }
 .save-overrides-btn:hover { background: #1f6feb; color: #fff; }
 
+.est-toggle { display: inline-block; width: 1.2em; text-align: center; font-size: 11px; }
+
 /* ===== Main Layout ===== */
 .main-layout { display: flex; gap: 16px; position: relative; }
 
