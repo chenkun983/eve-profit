@@ -12,10 +12,11 @@ venv/
 # 日志
 *.log
 
-# 数据文件（SDE 数据库太大，不同步到 Git）
+# 数据文件（不同步）
 data/sde.sqlite
 data/sde.sqlite.bz2
 data/sde.sqlite.tmp
+data/users.db
 data/.gitkeep
 
 # IDE
