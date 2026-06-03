@@ -120,6 +120,7 @@ function showAdmin() {
   document.getElementById('sidebar').style.display = 'none';
   document.getElementById('pageCategories').style.display = 'none';
   document.getElementById('pageRanking').style.display = 'block';
+  document.getElementById('pageEstimate').style.display = 'none';
   var area = document.getElementById('pageRanking');
   area.style.display = 'block';
   area.innerHTML = '<h3 style="margin-bottom:12px">\u7ba1\u7406\u540e\u53f0</h3><div class="loading">\u52a0\u8f7d\u4e2d...</div>';
