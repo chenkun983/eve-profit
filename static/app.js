@@ -184,8 +184,9 @@ function recalcWithRatios() {
 function renderResult(price, calc) {
   var area = document.getElementById('resultArea');
   var w = price.windows || {};
-  var sellMin = (w['7d']||{}).sell_min || 0;
-  var buyMax = (w['7d']||{}).buy_max || 0;
+  // 利润数据优先，否则从市场批量价取
+  var sellMin = (calc && calc.product_sell_min) ? calc.product_sell_min : ((w['7d']||{}).sell_min || 0);
+  var buyMax = (calc && calc.product_buy_max) ? calc.product_buy_max : ((w['7d']||{}).buy_max || 0);
   var sellVol = (w['7d']||{}).volume || 0;
   var buyVol = (w['7d']||{}).volume || 0;
   var d7sell_med = 0;
