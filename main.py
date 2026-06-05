@@ -1,23 +1,39 @@
 """EVE 制造利润分析器 - 服务器入口"""
 import os, sys, shutil, bz2, json, subprocess, hmac, hashlib
-from fastapi import FastAPI, Query, Header, HTTPException, Request
+from fastapi import FastAPI, Query, Header, HTTPException, Request, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import requests as req
+from starlette.middleware.base import BaseHTTPMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.database import SDEDatabase
 from core.market import MarketAPI
 from core.calculator import ProfitCalculator, ManufacturingConfig
-from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_admin, save_setting, load_setting
+from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_role, upgrade_manufacturer, check_manufacturer_expiry, submit_application, get_applications, review_application, generate_code, redeem_code, list_codes, log_visit, get_visit_stats, save_setting, load_setting
 from core.ranking import scan_category, scan_watchlist
 
 app = FastAPI(title="EVE 制造利润分析器")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+# 访问日志
+from fastapi import Request
+@app.middleware("http")
+async def log_visits(request: Request, call_next):
+    import time
+    start = time.time()
+    response = await call_next(request)
+    try:
+        ip = request.client.host if request.client else "unknown"
+        log_visit(ip)
+    except:
+        pass
+    return response
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE, 'data')
@@ -68,18 +84,18 @@ async def price(type_id: int = Query(...)):
 @app.get("/api/calculate")
 async def calculate(
     type_id: int = Query(...),
+    quantity: int = Query(1, ge=1, le=100000),
     sci: float = Query(0.03, ge=0, le=1),
-    bonus: float = Query(0.04, ge=0, le=1),
     tax: float = Query(0.01, ge=0, le=1),
     me: int = Query(0, ge=0, le=10),
     te: int = Query(0, ge=0, le=20),
+    skill: float = Query(1.0, ge=0.5, le=1.0),
     overrides: str = Query(None),
     material_ratios: str = Query(None),
     bom: bool = Query(False),
 ):
     cfg = ManufacturingConfig(
         system_cost_index=sci,
-        structure_bonus=bonus,
         facility_tax=tax,
         blueprint_me_level=me,
         blueprint_te_level=te,
@@ -102,6 +118,17 @@ async def calculate(
             pass
     result = calc.calculate_with_modes(type_id, mat_overrides, use_bom=bom, material_ratios=mat_ratios)
     if result:
+        # 按数量倍乘材料
+        if quantity > 1 and result.get('materials'):
+            for m in result['materials']:
+                m['quantity'] = m.get('quantity', 0) * quantity
+                m['total_sell'] = m.get('total_sell', 0) * quantity
+                m['total_buy'] = m.get('total_buy', 0) * quantity
+        if quantity > 1 and result.get('deep_materials'):
+            for m in result['deep_materials']:
+                m['quantity'] = m.get('quantity', 0) * quantity
+                m['total_sell'] = m.get('total_sell', 0) * quantity
+                m['total_buy'] = m.get('total_buy', 0) * quantity
         return {"ok": True, "data": result}
     return {"ok": False, "message": "无法计算"}
 
@@ -233,11 +260,17 @@ async def auth_status(authorization: str = Header(None)):
     token = authorization[7:] if authorization and authorization.startswith("Bearer ") else None
     uid = verify_token(token)
     is_admin = False
+    username = ""
+    role = "user"
     if uid:
         from core import auth as a
-        row = a._connect().execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
-        is_admin = bool(row and row['is_admin'])
-    return {"ok": True, "logged_in": uid is not None, "is_admin": is_admin}
+        row = a._connect().execute("SELECT is_admin, username, role, manufacturer_expires_at FROM users WHERE id=?", (uid,)).fetchone()
+        if row:
+            is_admin = bool(row['is_admin'])
+            username = row['username']
+            role = row['role'] or 'user'
+    return {"ok": True, "logged_in": uid is not None, "is_admin": is_admin, "username": username, "role": role,
+            "manufacturer_expires_at": (dict(row)['manufacturer_expires_at'] if row else None)}
 
 
 # ===================== 关注清单 =====================
@@ -386,14 +419,387 @@ async def api_load_setting(key: str = Query(...), default: str = Query(""),
     return {"ok": True, "value": val}
 
 
-@app.post("/api/admin/set-admin")
-async def api_set_admin(user_id: int = Query(...), is_admin: bool = Query(True),
-                         authorization: str = Header(None)):
+@app.post("/api/admin/set-role")
+async def api_set_role(user_id: int = Query(...), role: str = Query("user"),
+                        days: int = Query(30, ge=0, le=365),
+                        authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    admin_id = verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None)
+    if not admin_id:
+        raise HTTPException(403, "仅超级管理员可操作")
+    ok, msg = set_role(admin_id, user_id, role, days)
+    return {"ok": ok, "message": msg}
+
+from core.industry import (rebuild_material_cache, search_materials, is_material,
+    list_warehouses, create_warehouse, update_warehouse, delete_warehouse,
+    get_line_configs, save_line_config, set_line_count,
+    get_warehouse_config, save_warehouse_config,
+    get_inventory, get_all_inventory, import_inventory, manual_add_material,
+    parse_game_clipboard, calculate_material_requirements,
+    start_production, collect_production, cancel_production,
+    adjust_production_time, get_production_jobs,
+    calc_shortage, create_order, get_orders, update_order_status,
+    check_completed_jobs, mark_jobs_completed)
+
+# ========== 工业管理系统 API ==========
+
+# ---- 原料总表 ----
+@app.post("/api/industry/rebuild-cache")
+async def api_rebuild_cache(authorization: str = Header(None)):
     from core.auth import verify_token_admin
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可操作")
-    set_admin(user_id, is_admin)
+    count = rebuild_material_cache()
+    return {"ok": True, "count": count}
+
+@app.get("/api/industry/search-materials")
+async def api_search_materials(q: str = Query("")):
+    return {"ok": True, "materials": search_materials(q)}
+
+# ---- 分仓库 ----
+@app.get("/api/industry/warehouses")
+async def api_warehouses(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "warehouses": list_warehouses(uid)}
+
+@app.post("/api/industry/warehouse/create")
+async def api_create_warehouse(name: str = Query(...), character_name: str = Query(""),
+                                station_name: str = Query(""), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = create_warehouse(uid, name, character_name, station_name)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/industry/warehouse/update")
+async def api_update_warehouse(wid: int = Query(...), name: str = Query(None),
+                                character_name: str = Query(None), station_name: str = Query(None),
+                                authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok = update_warehouse(wid, uid, name, character_name, station_name)
+    return {"ok": ok}
+
+@app.post("/api/industry/warehouse/delete")
+async def api_delete_warehouse(wid: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok = delete_warehouse(wid, uid)
+    return {"ok": ok}
+
+# ---- 生产线 ----
+@app.get("/api/industry/line-configs")
+async def api_line_configs(warehouse_id: int = Query(...), authorization: str = Header(None)):
+    _require_user(authorization)
+    return {"ok": True, "configs": get_line_configs(warehouse_id)}
+
+@app.get("/api/industry/warehouse-config")
+async def api_warehouse_config(warehouse_id: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "config": get_warehouse_config(warehouse_id, uid)}
+
+@app.post("/api/industry/warehouse-config/save")
+async def api_save_warehouse_config(warehouse_id: int = Query(...), config: str = Query("{}"),
+                                    authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    import json
+    try:
+        cfg = json.loads(config)
+    except:
+        return {"ok": False, "message": "格式错误"}
+    ok = save_warehouse_config(warehouse_id, uid, cfg)
+    return {"ok": ok}
+
+@app.post("/api/industry/line-config/save")
+async def api_save_line_config(warehouse_id: int = Query(...), line_number: int = Query(...),
+                                product_type_id: int = Query(0),
+                                price_mode: str = Query('sell'), price_discount: float = Query(1.0),
+                                custom_price: float = Query(0),
+                                authorization: str = Header(None)):
+    _require_user(authorization)
+    ok = save_line_config(warehouse_id, line_number, product_type_id, price_mode, price_discount, custom_price)
+    return {"ok": ok}
+
+@app.post("/api/industry/line-count")
+async def api_set_line_count(warehouse_id: int = Query(...), count: int = Query(5),
+                              authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = set_line_count(warehouse_id, uid, count)
+    return {"ok": ok, "message": msg}
+
+# ---- 生产线系数保存 ----
+@app.get("/api/industry/line-coeffs")
+async def api_line_coeffs(warehouse_id: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import load_setting
+    val = load_setting(uid, f"line_coeffs_{warehouse_id}", "{}")
+    try:
+        import json
+        coeffs = json.loads(val)
+    except:
+        coeffs = {}
+    return {"ok": True, "coeffs": coeffs}
+
+@app.post("/api/industry/line-coeffs/save")
+async def api_save_line_coeffs(warehouse_id: int = Query(...), coeffs: str = Query("{}"),
+                               authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import save_setting
+    save_setting(uid, f"line_coeffs_{warehouse_id}", coeffs)
     return {"ok": True}
+
+# ---- 生产线成本与利润（使用仓库加成）----
+@app.get("/api/industry/line-cost")
+async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query(...),
+                         product_type_id: int = Query(...), quantity: int = Query(1),
+                         price_mode: str = Query('sell'), price_discount: float = Query(1.0),
+                         custom_price: float = Query(0),
+                         mat_rig: float = Query(3.8),
+                         mat_build: float = Query(0), mat_implant: float = Query(0),
+                         authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.database import SDEDatabase
+    from core.calculator import ProfitCalculator, ManufacturingConfig
+    from core.auth import load_material_overrides
+
+    sde = SDEDatabase()
+    # 读取保存的配置（每个产品独立）
+    overrides = load_material_overrides(uid, product_type_id)
+    config = overrides.get('-1', {})
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except:
+            config = {}
+    me = config.get('me', 10)
+    te = config.get('te', 20)
+
+    mfg_cfg = ManufacturingConfig(
+        blueprint_me_level=me, blueprint_te_level=te,
+        system_cost_index=config.get('sci', 0.03),
+        facility_tax=config.get('tax', 0.01)
+    )
+    calc = ProfitCalculator(sde, market, mfg_cfg)
+
+    # 读取保存的材料定价 + 比率
+    ov_dict = {}
+    ratios = {}
+    for k, v in overrides.items():
+        try:
+            kid = int(k)
+            if kid > 0:
+                ov_dict[str(kid)] = v  # string key 匹配 calculate_with_modes 的 str(mid)
+        except:
+            pass
+    ratios_raw = overrides.get('-2', {})
+    if isinstance(ratios_raw, dict):
+        ratios = {str(int(k)): float(v) for k, v in ratios_raw.items()}
+
+    # 从 realistic 模式取蓝图材料总成本
+    bp_result = calc.calculate_with_modes(product_type_id, material_overrides=ov_dict, material_ratios=ratios, use_bom=False)
+    if not bp_result:
+        return {"ok": False, "message": "无配方"}
+
+    # 生产线减材系数
+    line_mat_factor = ((100 - mat_rig) / 100) * ((100 - mat_build) / 100) * ((100 - mat_implant) / 100)
+
+    # 从 realistic 模式取蓝图材料总成本，再乘生产线减材系数
+    bp_total = 0
+    if bp_result.get('modes'):
+        for mo in bp_result['modes']:
+            if mo.get('key') == 'realistic' and mo.get('total_cost'):
+                bp_total = round(mo['total_cost'] * line_mat_factor, 2)
+                break
+    if not bp_total:
+        return {"ok": False, "message": "无法计算成本"}
+
+    prod_time = sde.get_manufacturing_time(product_type_id)
+    te_factor = 1.0 - (te * 0.01)  # 每级 1%
+    if te_factor < 0.5:
+        te_factor = 0.5
+    adjusted_time = int(prod_time * te_factor)
+
+    # 基础材料（BOM）成本和税费
+    try:
+        bom_result = calc.calculate_with_modes(product_type_id, material_overrides=ov_dict, material_ratios=ratios, use_bom=True)
+        raw_deep = 0
+        if bom_result:
+            raw_deep = sum((bm.get('total_sell', 0) or 0) for bm in (bom_result.get('deep_materials') or []))
+            # 如果 mode 里有 ideal，用它的 material_cost_eff（不含税费）
+            if bom_result.get('modes'):
+                for mo in bom_result['modes']:
+                    if mo.get('key') == 'ideal' and mo.get('material_cost_eff'):
+                        raw_deep = mo['material_cost_eff']
+                        break
+        if raw_deep:
+            sci_rate = mfg_cfg.system_cost_index or 0
+            tax_rate = mfg_cfg.facility_tax or 0
+            deep_total = round((raw_deep + raw_deep * sci_rate + raw_deep * tax_rate) * line_mat_factor, 2)
+    except Exception as e:
+        deep_total = 0
+
+    prices = market.get_prices_batch([product_type_id])
+    prod_price = prices.get(product_type_id, {})
+    market_sell = prod_price.get('sell_min', 0)
+    market_buy = prod_price.get('buy_max', 0)
+    if price_mode == 'sell':
+        unit_price = market_sell * price_discount
+    elif price_mode == 'buy':
+        unit_price = market_buy * price_discount
+    else:
+        unit_price = custom_price
+
+    total_revenue = round(unit_price * quantity, 2)
+
+    return {
+        "ok": True,
+        "data": {
+            "product_name": sde.get_chinese_name(product_type_id),
+            "bp_cost": bp_total,
+            "deep_cost": deep_total,
+            "market_sell": market_sell,
+            "market_buy": market_buy,
+            "unit_price": round(unit_price, 2),
+            "total_revenue": total_revenue,
+            "profit_bp": round(total_revenue - bp_total, 2),
+            "profit_deep": round(total_revenue - deep_total, 2),
+            "margin_bp": round(((total_revenue - bp_total) / bp_total * 100), 2) if bp_total > 0 else 0,
+            "margin_deep": round(((total_revenue - deep_total) / deep_total * 100), 2) if deep_total > 0 else 0,
+            "prod_time": adjusted_time,
+            "_debug_config": {
+                "me": me, "te": te
+            }
+        }
+    }
+
+
+# ---- 库存 ----
+@app.get("/api/industry/inventory")
+async def api_inventory(warehouse_id: int = Query(...), authorization: str = Header(None)):
+    _require_user(authorization)
+    return {"ok": True, "items": get_inventory(warehouse_id)}
+
+@app.get("/api/industry/all-inventory")
+async def api_all_inventory(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "items": get_all_inventory(uid)}
+
+@app.post("/api/industry/import")
+async def api_import_inventory(warehouse_id: int = Query(...), text: str = Body("", embed=True),
+                                mode: str = Query("append"), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    parsed = parse_game_clipboard(text)
+    # 解析 type_id
+    from core.estimator import search_item
+    items = []
+    skipped = []
+    for p in parsed:
+        tid = search_item(p['name'])
+        if tid and is_material(tid):
+            items.append({'type_id': tid, 'quantity': p['quantity']})
+        else:
+            skipped.append(p['name'])
+    ok, msg = import_inventory(warehouse_id, uid, items, mode)
+    return {"ok": ok, "message": msg, "parsed": len(parsed), "imported": len(items), "skipped": skipped}
+
+@app.post("/api/industry/manual-add")
+async def api_manual_add(warehouse_id: int = Query(...), type_id: int = Query(...),
+                          quantity: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = manual_add_material(warehouse_id, uid, type_id, quantity)
+    return {"ok": ok, "message": msg}
+
+# ---- 生产任务 ----
+@app.post("/api/industry/start-production")
+async def api_start_production(warehouse_id: int = Query(...), line_number: int = Query(...),
+                                product_type_id: int = Query(...), quantity: int = Query(1),
+                                time_skill: int = Query(32), time_build: int = Query(30), time_rig: int = Query(0),
+                                mat_rig: float = Query(3.8),
+                                mat_build: float = Query(0), mat_implant: float = Query(0),
+                                authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, result = start_production(warehouse_id, line_number, uid, product_type_id, quantity,
+                                  time_skill, time_build, time_rig, mat_rig, mat_build, mat_implant)
+    return {"ok": ok, "result": result if isinstance(result, dict) else None, "message": result if isinstance(result, str) else None}
+
+@app.post("/api/industry/collect")
+async def api_collect(job_id: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = collect_production(job_id, uid)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/industry/cancel")
+async def api_cancel(job_id: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = cancel_production(job_id, uid)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/industry/adjust-time")
+async def api_adjust_time(job_id: int = Query(...), new_end: str = Query(...),
+                          authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = adjust_production_time(job_id, uid, new_end)
+    return {"ok": ok, "message": msg}
+
+@app.get("/api/industry/jobs")
+async def api_jobs(warehouse_id: int = Query(None), status: str = Query(None),
+                   authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "jobs": get_production_jobs(warehouse_id, uid, status)}
+
+# ---- 缺口统计 ----
+@app.get("/api/industry/shortage")
+async def api_shortage(warehouse_id: int = Query(...), mat_rig: float = Query(3.8),
+                       mat_build: float = Query(0), mat_implant: float = Query(0),
+                       authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    result = calc_shortage(warehouse_id, uid, mat_rig, mat_build, mat_implant)
+    return {"ok": True, "result": result}
+
+# ---- 制造订单 ----
+@app.post("/api/industry/order/create")
+async def api_create_order(customer_name: str = Query(...), items: str = Query("[]"),
+                            delivery_location: str = Query("游戏内对接"),
+                            pricing_mode: str = Query("sell"), discount: float = Query(1.0),
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    import json
+    try:
+        item_list = json.loads(items)
+    except:
+        return {"ok": False, "message": "物品格式错误"}
+    ok, msg, total = create_order(uid, customer_name, item_list, delivery_location, pricing_mode, discount)
+    return {"ok": ok, "message": msg, "estimated_total": total}
+
+@app.get("/api/industry/orders")
+async def api_orders(status: str = Query(None), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "orders": get_orders(uid, status)}
+
+@app.post("/api/industry/order/status")
+async def api_order_status(order_id: int = Query(...), status: str = Query("accepted"),
+                           authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = update_order_status(order_id, uid, status)
+    return {"ok": ok, "message": msg}
+
+# ---- 超时检查 ----
+@app.get("/api/industry/check-completed")
+async def api_check_completed(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    jobs = check_completed_jobs(uid)
+    ids = [j['id'] for j in jobs]
+    if ids:
+        mark_jobs_completed(ids)
+        # 发送站内消息
+        for j in jobs:
+            from core.auth import send_message
+            send_message(0, uid, "生产完成", f"分仓库 '{j.get('warehouse_name','?')}' 的生产已完成，请及时收付。")
+    return {"ok": True, "completed": len(ids)}
+
+
+@app.post("/api/upgrade-manufacturer")
+async def api_upgrade(days: int = Query(30, ge=1, le=365),
+                       authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = upgrade_manufacturer(uid, days)
+    return {"ok": ok, "message": msg}
 
 
 # ===================== GitHub Webhook（自动部署） =====================
@@ -434,8 +840,9 @@ async def github_webhook(request: Request, x_hub_signature_256: str = Header(Non
 # ===================== 矿物估价 =====================
 
 @app.post("/api/estimate")
-async def api_estimate(reprocess_rate: float = Query(0.55, ge=0, le=1), text: str = Query("")):
-    from core.estimator import estimate_items, parse_input_text, parse_item_line
+async def api_estimate(reprocess_rate: float = Query(0.55, ge=0, le=1), ore_rate: float = Query(0.825, ge=0, le=1),
+                       text: str = Query("")):
+    from core.estimator import estimate_items, parse_input_text, parse_item_line, estimate_is_ore
     lines = text.strip().split('\n')
     parsed = []
     for line in lines:
@@ -444,7 +851,7 @@ async def api_estimate(reprocess_rate: float = Query(0.55, ge=0, le=1), text: st
             parsed.append({'name': name, 'quantity': qty})
     if not parsed:
         return {"ok": False, "message": "未识别到物品"}
-    results = estimate_items(parsed, reprocess_rate)
+    results = estimate_items(parsed, reprocess_rate, ore_rate)
     totals = {'direct_sell': 0, 'direct_buy': 0, 'mineral_sell': 0, 'mineral_buy': 0}
     for r in results:
         totals['direct_sell'] += r.get('direct_sell_total', 0)
@@ -452,6 +859,145 @@ async def api_estimate(reprocess_rate: float = Query(0.55, ge=0, le=1), text: st
         totals['mineral_sell'] += r.get('mineral_sell_total', 0)
         totals['mineral_buy'] += r.get('mineral_buy_total', 0)
     return {"ok": True, "results": results, "totals": totals}
+
+
+# ===================== 制造商申请 & 激活码 =====================
+
+@app.post("/api/apply-manufacturer")
+async def api_apply(character_name: str = Query(""), notes: str = Query(""), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = submit_application(uid, 'manufacturer', character_name)
+    if ok and character_name:
+        # 同时发送站内消息给超级管理员
+        from core.auth import send_message
+        send_message(uid, 0, f"制造商申请 - {character_name}", f"游戏ID: {character_name}\n备注: {notes}")
+    return {"ok": ok, "message": msg}
+
+
+@app.get("/api/admin/applications")
+async def api_applications(status: str = Query(None), authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    return {"ok": True, "applications": get_applications(status)}
+
+
+@app.get("/api/admin/visit-stats")
+async def api_visit_stats(authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可查看")
+    return {"ok": True, "stats": get_visit_stats()}
+
+
+@app.post("/api/admin/review-application")
+async def api_review(app_id: int = Query(...), status: str = Query("approved"),
+                     notes: str = Query(""), authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    admin_id = verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None)
+    if not admin_id:
+        raise HTTPException(403, "仅管理员可操作")
+    ok, msg = review_application(app_id, admin_id, status, notes)
+    return {"ok": ok, "message": msg}
+
+
+@app.post("/api/admin/generate-code")
+async def api_gen_code(duration: int = Query(30), max_uses: int = Query(1),
+                       authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    admin_id = verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None)
+    if not admin_id:
+        raise HTTPException(403, "仅管理员可操作")
+    code = generate_code(admin_id, duration, max_uses)
+    return {"ok": True, "code": code}
+
+
+@app.post("/api/redeem-code")
+async def api_redeem(code: str = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = redeem_code(uid, code)
+    return {"ok": ok, "message": msg}
+
+
+# ========== 站内消息 ==========
+
+@app.get("/api/messages/inbox")
+async def api_inbox(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import get_inbox
+    return {"ok": True, "messages": get_inbox(uid)}
+
+
+@app.get("/api/messages/outbox")
+async def api_outbox(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import get_outbox
+    return {"ok": True, "messages": get_outbox(uid)}
+
+
+@app.post("/api/messages/send")
+async def api_send_msg(to_user_id: int = Query(0), title: str = Query(""), content: str = Query(""),
+                       authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import send_message
+    ok, msg = send_message(uid, to_user_id, title, content)
+    return {"ok": ok, "message": msg}
+
+
+@app.put("/api/messages/read/{msg_id}")
+async def api_read_msg(msg_id: int, authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import mark_message_read
+    mark_message_read(msg_id, uid)
+    return {"ok": True}
+
+
+@app.put("/api/messages/process/{msg_id}")
+async def api_process_msg(msg_id: int, authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    from core.auth import _connect
+    conn = _connect()
+    conn.execute("UPDATE messages SET is_processed=1 WHERE id=?", (msg_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/messages/unread-count")
+async def api_unread_count(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import get_unread_count
+    return {"ok": True, "count": get_unread_count(uid)}
+
+
+# ========== 管理员设置 ==========
+
+@app.get("/api/payment-recipient")
+async def api_payment_recipient():
+    """无需登录，返回游戏收款人"""
+    from core.auth import get_admin_setting
+    return {"ok": True, "payment_recipient": get_admin_setting("payment_recipient", "未设置")}
+
+
+@app.get("/api/admin/settings")
+async def api_admin_settings(authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    from core.auth import get_admin_setting
+    return {"ok": True, "payment_recipient": get_admin_setting("payment_recipient", "未设置")}
+
+
+@app.post("/api/admin/settings")
+async def api_set_admin_settings(payment_recipient: str = Query(""), authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    from core.auth import set_admin_setting
+    set_admin_setting("payment_recipient", payment_recipient)
+    return {"ok": True, "message": "已更新"}
 
 
 def from_cache(key):

@@ -61,8 +61,12 @@ header h1 { font-size: 22px; color: #58a6ff; }
 .watch-btn-sm:hover { background: #238636; color: #fff; }
 
 .user-menu { position: absolute; top: 100%; right: 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; z-index: 300; min-width: 120px; display: none; }
-.user-menu-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: #c9d1d9; }
+.user-menu-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: #c9d1d9; position: relative; }
 .user-menu-item:hover { background: #1c2128; }
+.msg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.industry-page { padding: 16px 0; }
+.wh-card { background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:14px; margin-bottom:8px; cursor:pointer; display:inline-block; width:220px; margin-right:8px; vertical-align:top; transition:border-color .2s; }
+.wh-card:hover { border-color:#58a6ff; }
 .header-right { position: relative; }
 
 .profit-tabs { display: flex; gap: 0; margin: 12px 0; border-bottom: 1px solid #30363d; }

@@ -110,9 +110,17 @@ def scan_watchlist(user_id, discount=0.9):
         if mats:
             idata['has_blueprint'] = True
             saved = auth.load_material_overrides(user_id, tid)
+            mat_ratios = {}
+            if isinstance(saved, dict):
+                _r = saved.pop('_ratios', {})
+                if isinstance(_r, dict):
+                    for k, v in _r.items():
+                        try: mat_ratios[str(k)] = float(v)
+                        except: pass
+                saved.pop('_config', None)
             calc = ProfitCalculator(db_sde, market_api, ManufacturingConfig(wholesale_discount=discount))
             calc.market.get_prices_batch = lambda ids, s=30000142: prices
-            _fill_modes(calc.calculate_with_modes(tid, material_overrides=saved), idata)
+            _fill_modes(calc.calculate_with_modes(tid, material_overrides=saved, material_ratios=mat_ratios), idata)
         result.append(idata)
     result.sort(key=lambda x: max(x['realistic']['profit'] if x['realistic'] else 0, x['flip_profit']), reverse=True)
     return result

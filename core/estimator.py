@@ -106,7 +106,30 @@ def get_portion_size(type_id: int) -> int:
     return r['portionSize'] if r and r['portionSize'] > 0 else 1
 
 
-def estimate_items(items: list, reprocess_rate: float = 0.55):
+# 矿石 groupID 列表（EVE SDE 标准）
+ORE_GROUP_IDS = {450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465,
+                 467,468,469,470,471,472,473,474,475,476,
+                 477,478,  # 冰矿
+                 1136,1137,1138,1139,1140,1141,  # 月矿
+                 1855,  # 冰产品（用于制造）
+                 1885}  # 气云
+
+
+def estimate_is_ore(type_id: int) -> bool:
+    """判断物品是否是矿石（通过 SDE groupID）"""
+    from .database import SDEDatabase
+    db = SDEDatabase()
+    conn = db._connect()
+    try:
+        row = conn.execute("SELECT groupID FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
+        if row:
+            return row['groupID'] in ORE_GROUP_IDS
+        return False
+    finally:
+        conn.close()
+
+
+def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 0.825):
     """
     批量估价
     items: [{'name': '斜长岩', 'quantity': 1000}, ...]
@@ -130,7 +153,9 @@ def estimate_items(items: list, reprocess_rate: float = 0.55):
         buy_max = pd.get('buy_max', 0)
 
         # 化矿
-        mats, residue = get_reprocess_materials(tid, qty, reprocess_rate)
+        is_ore = estimate_is_ore(tid)
+        actual_rate = ore_rate if is_ore else reprocess_rate
+        mats, residue = get_reprocess_materials(tid, qty, actual_rate)
         if mats:
             for m in mats:
                 all_mineral_ids.add(m['type_id'])

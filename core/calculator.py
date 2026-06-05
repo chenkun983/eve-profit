@@ -20,12 +20,12 @@ class ManufacturingConfig:
 class ProfitCalculator:
     PRICING_MODES = [
         {'key': 'realistic', 'label': '蓝图材料零售利润',
-         'desc': '蓝图材料 × 卖单价，成品按最低卖单价出售',
+         'desc': '蓝图材料成本，成品按最低卖单价出售',
          'mat_price_mode': 'sell', 'prod_price_mode': 'sell'},
         {'key': 'ideal', 'label': '基础材料零售利润',
-         'desc': '全量追溯材料 × 卖单价，成品按最低卖单价出售',
+         'desc': '基础材料成本，成品按最低卖单价出售',
          'mat_price_mode': 'sell', 'prod_price_mode': 'sell', 'use_bom': True},
-        {'key': 'conservative', 'label': '收单价利润',
+        {'key': 'conservative', 'label': '买办利润',
          'desc': '材料按卖单价买，成品按最高收单价秒出',
          'mat_price_mode': 'sell', 'prod_price_mode': 'buy'},
         {'key': 'wholesale_bp', 'label': '蓝图材料批发利润',
@@ -85,8 +85,10 @@ class ProfitCalculator:
         product_sell_min = product_pd.get('sell_min', product_sell) if product_pd else 0
         product_buy_max = product_pd.get('buy_max', product_buy) if product_pd else 0
 
-        total_me = self.config.structure_bonus + self.config.blueprint_me_level * 0.01
-        efficiency = 1.0 / (1.0 + total_me)
+        total_me = self.config.blueprint_me_level * 0.01
+        efficiency = 1.0 - total_me
+        if efficiency < 0.5:
+            efficiency = 0.5
 
         bp = self._bp_info(type_id)
         output_qty = bp['outputQty'] if bp else 1
@@ -181,13 +183,12 @@ class ProfitCalculator:
 
             # 成品价格：零售用最低卖价，收单价用最高买价，批发用卖价打折
             prod_price = product_sell_min  # 零售用最低卖单价
-            if mode['prod_price_mode'] == 'wholesale':
-                wd = self.config.wholesale_discount if hasattr(self.config, 'wholesale_discount') else 0.9
-                prod_price = product_sell_min * wd
-            elif mode['prod_price_mode'] == 'buy':
+            if mode['prod_price_mode'] == 'buy':
                 prod_price = product_buy_max  # 收单用最高买单价
+            elif mode['prod_price_mode'] == 'wholesale':
+                prod_price = product_buy_max  # 批发用最高买单价
             else:
-                prod_price = product_sell
+                prod_price = product_sell_min  # 零售用最低卖单价
             revenue = prod_price * output_qty
 
             sys_cost = mat_cost_eff * self.config.system_cost_index

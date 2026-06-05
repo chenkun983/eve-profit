@@ -28,6 +28,8 @@ def init_db():
             password_hash TEXT NOT NULL,
             email TEXT DEFAULT '',
             is_admin INTEGER DEFAULT 0,
+            role TEXT DEFAULT 'user',
+            manufacturer_expires_at TEXT DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now'))
         );
         
@@ -67,7 +69,50 @@ def init_db():
             UNIQUE(user_id, setting_key),
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            app_type TEXT NOT NULL DEFAULT 'manufacturer',
+            payment_id TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            notes TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            reviewed_by INTEGER DEFAULT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS activation_codes (
+            code TEXT PRIMARY KEY,
+            duration_days INTEGER NOT NULL DEFAULT 30,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            expires_at TEXT DEFAULT NULL,
+            FOREIGN KEY(created_by) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS visit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL,
+            visited_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_user_id INTEGER NOT NULL,
+            to_user_id INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(from_user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS admin_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL DEFAULT ''
+        );
     """)
+    conn.commit()
+    # 初始化默认设置
+    conn.execute("INSERT OR IGNORE INTO admin_settings (setting_key, setting_value) VALUES ('payment_recipient', '未设置')")
     conn.commit()
     # 迁移：兼容旧表（可能缺少某些列）
     try:
@@ -78,6 +123,137 @@ def init_db():
         conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
     except:
         pass
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN manufacturer_expires_at TEXT DEFAULT NULL")
+    except:
+        pass
+    # 迁移：messages 表增加已处理标记
+    try:
+        conn.execute("ALTER TABLE messages ADD COLUMN is_processed INTEGER DEFAULT 0")
+    except:
+        pass
+    # 迁移：工业管理系统表
+    # 分仓库表加统一加成字段
+    try:
+        conn.execute("ALTER TABLE sub_warehouses ADD COLUMN me_level INTEGER DEFAULT 10")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE sub_warehouses ADD COLUMN te_level INTEGER DEFAULT 20")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE sub_warehouses ADD COLUMN skill_bonus REAL DEFAULT 0.85")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE sub_warehouses ADD COLUMN building_bonus REAL DEFAULT 1.0")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE sub_warehouses ADD COLUMN implant_bonus REAL DEFAULT 1.0")
+    except:
+        pass
+    # 线配置加价格字段
+    try:
+        conn.execute("ALTER TABLE line_configs ADD COLUMN price_mode TEXT DEFAULT 'sell'")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE line_configs ADD COLUMN price_discount REAL DEFAULT 1.0")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE line_configs ADD COLUMN custom_price REAL DEFAULT 0")
+    except:
+        pass
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS material_master (
+            type_id INTEGER PRIMARY KEY,
+            name_cn TEXT NOT NULL DEFAULT '',
+            name_en TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS sub_warehouses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            character_name TEXT DEFAULT '',
+            station_name TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id INTEGER NOT NULL,
+            type_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(warehouse_id, type_id),
+            FOREIGN KEY(warehouse_id) REFERENCES sub_warehouses(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS line_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id INTEGER NOT NULL,
+            line_number INTEGER NOT NULL,
+            product_type_id INTEGER DEFAULT 0,
+            me_level INTEGER DEFAULT 10,
+            te_level INTEGER DEFAULT 20,
+            skill_bonus REAL DEFAULT 0.85,
+            building_bonus REAL DEFAULT 1.0,
+            implant_bonus REAL DEFAULT 1.0,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(warehouse_id, line_number),
+            FOREIGN KEY(warehouse_id) REFERENCES sub_warehouses(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS production_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id INTEGER NOT NULL,
+            line_number INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            product_type_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            batch_size INTEGER NOT NULL DEFAULT 1,
+            started_at TEXT DEFAULT (datetime('now')),
+            estimated_end_at TEXT NOT NULL,
+            actual_end_at TEXT DEFAULT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            config_snapshot TEXT DEFAULT '{}',
+            FOREIGN KEY(warehouse_id) REFERENCES sub_warehouses(id)
+        );
+        CREATE TABLE IF NOT EXISTS manufacturing_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            customer_name TEXT NOT NULL,
+            delivery_location TEXT DEFAULT '游戏内对接',
+            items TEXT NOT NULL DEFAULT '[]',
+            pricing_mode TEXT NOT NULL DEFAULT 'sell',
+            discount REAL NOT NULL DEFAULT 1.0,
+            estimated_total REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS manufacturing_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            warehouse_id INTEGER NOT NULL,
+            product_type_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            materials_cost REAL NOT NULL DEFAULT 0,
+            sell_price REAL NOT NULL DEFAULT 0,
+            profit REAL NOT NULL DEFAULT 0,
+            started_at TEXT NOT NULL,
+            completed_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+    """)
+    # 迁移：将所有 is_admin=1 的用户设为对应角色
+    conn.execute("UPDATE users SET role='super_admin' WHERE is_admin=1 AND id=(SELECT MIN(id) FROM users WHERE is_admin=1)")
+    conn.execute("UPDATE users SET role='admin' WHERE is_admin=1 AND (role IS NULL OR role='' OR role='user')")
     conn.commit()
     conn.close()
 
@@ -94,8 +270,9 @@ def register(username: str, password: str) -> tuple[bool, str]:
         # 第一个注册的用户自动成为管理员
         exists = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         is_admin = 1 if exists == 0 else 0
-        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
-                     (username, h, is_admin))
+        role = 'super_admin' if exists == 0 else 'user'
+        conn.execute("INSERT INTO users (username, password_hash, is_admin, role) VALUES (?, ?, ?, ?)",
+                     (username, h, is_admin, role))
         conn.commit()
         msg = "注册成功" + ("（管理员）" if is_admin else "")
         return True, msg
@@ -117,6 +294,8 @@ def login(username: str, password: str) -> tuple[bool, str, str | None]:
         if not row:
             return False, "用户名或密码错误", None
         user_id = row['id']
+        # 检查制造商是否过期
+        check_manufacturer_expiry(user_id)
         token = secrets.token_hex(32)
         expires = time.time() + 86400 * 7  # 7 天有效
         conn.execute("INSERT OR REPLACE INTO tokens (token, user_id, expires_at) VALUES (?, ?, ?)",
@@ -209,10 +388,13 @@ def save_material_overrides(user_id: int, product_type_id: int, overrides: dict)
     for mat_id_str, mode in overrides.items():
         try:
             if mat_id_str == '_config':
-                # 保存配置参数
                 import json as _json
                 conn.execute("INSERT OR REPLACE INTO material_overrides (user_id, product_type_id, material_type_id, pricing_mode) VALUES (?, ?, ?, ?)",
                             (user_id, product_type_id, -1, _json.dumps(mode)))
+            elif mat_id_str == '_ratios':
+                import json as _json
+                conn.execute("INSERT OR REPLACE INTO material_overrides (user_id, product_type_id, material_type_id, pricing_mode) VALUES (?, ?, ?, ?)",
+                            (user_id, product_type_id, -2, _json.dumps(mode)))
             else:
                 mat_id = int(mat_id_str)
                 conn.execute(
@@ -241,6 +423,12 @@ def load_material_overrides(user_id: int, product_type_id: int) -> dict:
                 result['_config'] = _json.loads(r['pricing_mode'])
             except:
                 pass
+        elif r['material_type_id'] == -2:
+            import json as _json
+            try:
+                result['_ratios'] = _json.loads(r['pricing_mode'])
+            except:
+                pass
         else:
             result[str(r['material_type_id'])] = r['pricing_mode']
     return result
@@ -250,7 +438,7 @@ def load_material_overrides(user_id: int, product_type_id: int) -> dict:
 
 def get_profile(user_id: int) -> dict:
     conn = _connect()
-    row = conn.execute("SELECT username, email, is_admin, created_at FROM users WHERE id=?",
+    row = conn.execute("SELECT username, email, is_admin, role, manufacturer_expires_at, created_at FROM users WHERE id=?",
                       (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else {}
@@ -278,14 +466,221 @@ def update_profile(user_id: int, email: str = None, old_password: str = None, ne
 def list_users() -> list:
     """管理员获取用户列表"""
     conn = _connect()
-    rows = conn.execute("SELECT id, username, email, is_admin, created_at FROM users ORDER BY id").fetchall()
+    rows = conn.execute("SELECT id, username, email, is_admin, role, manufacturer_expires_at, created_at FROM users ORDER BY id").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def set_admin(user_id: int, is_admin: bool = True) -> bool:
-    """设置/取消管理员"""
+def set_role(actor_id: int, target_id: int, new_role: str, days: int = 30) -> tuple:
+    """设置用户角色，返回 (成功, 消息)
+    actor_id: 操作者
+    target_id: 目标用户
+    new_role: user / manufacturer / admin
+    只有 super_admin 可以设置 admin 角色
+    不能自己操作自己
+    """
     conn = _connect()
+    try:
+        actor = conn.execute("SELECT role FROM users WHERE id=?", (actor_id,)).fetchone()
+        if not actor or actor['role'] not in ('super_admin', 'admin'):
+            conn.close()
+            return False, "无权限"
+        if actor_id == target_id:
+            conn.close()
+            return False, "不能操作自己"
+        if new_role == 'admin':
+            if actor['role'] != 'super_admin':
+                conn.close()
+                return False, "只有超级管理员才能任命管理员"
+            conn.execute("UPDATE users SET role='admin', is_admin=1 WHERE id=?", (target_id,))
+        elif new_role == 'manufacturer':
+            import time
+            if days <= 0:
+                expires = None  # 永久
+            else:
+                # 检查是否有已有到期时间，有则叠加
+                row = conn.execute("SELECT manufacturer_expires_at FROM users WHERE id=?", (target_id,)).fetchone()
+                if row and row['manufacturer_expires_at']:
+                    try:
+                        existing_ts = time.mktime(time.strptime(row['manufacturer_expires_at'], '%Y-%m-%d %H:%M:%S'))
+                        now_ts = time.time()
+                        base_ts = max(existing_ts, now_ts)  # 取现有到期时间和当前时间中的较晚者
+                    except:
+                        base_ts = time.time()
+                else:
+                    base_ts = time.time()
+                expires = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(base_ts + days*86400))
+            conn.execute("UPDATE users SET role='manufacturer', is_admin=0, manufacturer_expires_at=? WHERE id=?",
+                        (expires, target_id))
+        elif new_role == 'user':
+            conn.execute("UPDATE users SET role='user', is_admin=0 WHERE id=?", (target_id,))
+        else:
+            conn.close()
+            return False, "无效角色"
+        conn.commit()
+        return True, "修改成功"
+    finally:
+        conn.close()
+
+
+def check_manufacturer_expiry(user_id: int) -> bool:
+    """检查制造商是否过期，过期则降为用户"""
+    conn = _connect()
+    row = conn.execute("SELECT role, manufacturer_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row or row['role'] != 'manufacturer':
+        conn.close()
+        return True  # 不是制造商，不需要检查
+    expires = row['manufacturer_expires_at']
+    if not expires:
+        conn.close()
+        return True
+    import time
+    try:
+        exp_ts = time.mktime(time.strptime(expires, '%Y-%m-%d %H:%M:%S'))
+        if time.time() > exp_ts:
+            conn.execute("UPDATE users SET role='user', manufacturer_expires_at=NULL WHERE id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            return False  # 已过期降级
+    except:
+        pass
+    conn.close()
+    return True
+
+
+def upgrade_manufacturer(user_id: int, days: int = 30) -> tuple:
+    """用户自行升级或延长制造商"""
+    import time
+    conn = _connect()
+    row = conn.execute("SELECT role, manufacturer_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return False, "用户不存在"
+    if row['role'] in ('admin', 'super_admin'):
+        conn.close()
+        return False, "管理员无需升级"
+    now = time.time()
+    if row['role'] == 'manufacturer' and row['manufacturer_expires_at']:
+        try:
+            existing = time.mktime(time.strptime(row['manufacturer_expires_at'], '%Y-%m-%d %H:%M:%S'))
+            if existing > now:
+                now = existing  # 在现有到期时间上续期
+        except:
+            pass
+    expires = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now + days*86400))
+    conn.execute("UPDATE users SET role='manufacturer', manufacturer_expires_at=? WHERE id=?", (expires, user_id))
+    conn.commit()
+    conn.close()
+    return True, f"制造商资格已延长至 {expires}"
+
+
+# ========== 申请系统 ==========
+
+def submit_application(user_id: int, app_type: str, payment_id: str = "") -> tuple:
+    conn = _connect()
+    conn.execute("INSERT INTO applications (user_id, app_type, payment_id) VALUES (?, ?, ?)",
+                (user_id, app_type, payment_id))
+    conn.commit()
+    conn.close()
+    return True, "申请已提交，等待管理员审核"
+
+
+def get_applications(status: str = None) -> list:
+    conn = _connect()
+    if status:
+        rows = conn.execute("SELECT a.*, u.username FROM applications a JOIN users u ON a.user_id=u.id WHERE a.status=? ORDER BY a.created_at DESC", (status,)).fetchall()
+    else:
+        rows = conn.execute("SELECT a.*, u.username FROM applications a JOIN users u ON a.user_id=u.id ORDER BY a.created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def review_application(app_id: int, reviewer_id: int, status: str, notes: str = "") -> tuple:
+    """审核申请, status: 'approved'/'rejected'"""
+    conn = _connect()
+    app = conn.execute("SELECT * FROM applications WHERE id=?", (app_id,)).fetchone()
+    if not app:
+        conn.close()
+        return False, "申请不存在"
+    if app['status'] != 'pending':
+        conn.close()
+        return False, "该申请已处理"
+    conn.execute("UPDATE applications SET status=?, notes=?, reviewed_by=? WHERE id=?",
+                (status, notes, reviewer_id, app_id))
+    if status == 'approved':
+        upgrade_manufacturer(app['user_id'], 30)
+    conn.commit()
+    conn.close()
+    return True, f"申请已{status}"
+
+
+# ========== 激活码系统 ==========
+
+def generate_code(created_by: int, duration_days: int = 30, max_uses: int = 1, expires_days: int = 365) -> str:
+    import secrets, time
+    code = secrets.token_hex(8).upper()
+    expires = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + expires_days*86400))
+    conn = _connect()
+    conn.execute("INSERT INTO activation_codes (code, duration_days, max_uses, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+                (code, duration_days, max_uses, created_by, expires))
+    conn.commit()
+    conn.close()
+    return code
+
+
+def redeem_code(user_id: int, code: str) -> tuple:
+    conn = _connect()
+    row = conn.execute("SELECT * FROM activation_codes WHERE code=?", (code.upper(),)).fetchone()
+    if not row:
+        conn.close()
+        return False, "激活码不存在"
+    if row['used_count'] >= row['max_uses']:
+        conn.close()
+        return False, "激活码已用完"
+    import time
+    try:
+        exp = time.mktime(time.strptime(row['expires_at'], '%Y-%m-%d %H:%M:%S'))
+        if time.time() > exp:
+            conn.close()
+            return False, "激活码已过期"
+    except:
+        pass
+    conn.execute("UPDATE activation_codes SET used_count=used_count+1 WHERE code=?", (code.upper(),))
+    conn.commit()
+    conn.close()
+    upgrade_manufacturer(user_id, row['duration_days'])
+    return True, f"激活成功，获得 {row['duration_days']} 天制造商资格"
+
+
+def list_codes() -> list:
+    conn = _connect()
+    rows = conn.execute("SELECT c.*, u.username FROM activation_codes c JOIN users u ON c.created_by=u.id ORDER BY c.created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ========== 访问统计 ==========
+
+def log_visit(ip: str):
+    import time
+    conn = _connect()
+    conn.execute("INSERT INTO visit_logs (ip, visited_at) VALUES (?, ?)", (ip, time.time()))
+    conn.commit()
+    conn.close()
+
+
+def get_visit_stats() -> dict:
+    import time
+    conn = _connect()
+    now = time.time()
+    stats = {}
+    for label, seconds in [('24h', 86400), ('7d', 604800), ('30d', 2592000)]:
+        cutoff = now - seconds
+        total = conn.execute("SELECT COUNT(*) FROM visit_logs WHERE visited_at>?", (cutoff,)).fetchone()[0]
+        unique = conn.execute("SELECT COUNT(DISTINCT ip) FROM visit_logs WHERE visited_at>?", (cutoff,)).fetchone()[0]
+        stats[label] = {'total': total, 'unique': unique}
+    conn.close()
+    return stats
     conn.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, user_id))
     conn.commit()
     conn.close()
@@ -298,6 +693,80 @@ def save_setting(user_id: int, key: str, value: str):
                 (user_id, key, value))
     conn.commit()
     conn.close()
+
+
+
+# ========== 站内消息系统 ==========
+
+def send_message(from_id: int, to_id: int, title: str, content: str) -> tuple:
+    """发送站内消息，to_id=0 表示发送给所有超级管理员，from_id=0 表示系统消息"""
+    conn = _connect()
+    if to_id == 0:
+        admins = conn.execute("SELECT id FROM users WHERE role='super_admin'").fetchall()
+        if not admins:
+            conn.close()
+            return False, "没有超级管理员"
+        for a in admins:
+            conn.execute("INSERT INTO messages (from_user_id, to_user_id, title, content) VALUES (?, ?, ?, ?)",
+                        (from_id, a['id'], title, content))
+    else:
+        conn.execute("INSERT INTO messages (from_user_id, to_user_id, title, content) VALUES (?, ?, ?, ?)",
+                    (from_id, to_id, title, content))
+    conn.commit()
+    conn.close()
+    return True, "消息已发送"
+
+
+def get_inbox(user_id: int, limit: int = 50) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT m.*, CASE WHEN m.from_user_id=0 THEN '系统' ELSE u.username END as from_name, "
+        "u.role as from_role FROM messages m "
+        "LEFT JOIN users u ON m.from_user_id=u.id "
+        "WHERE m.to_user_id=? ORDER BY m.created_at DESC LIMIT ?", (user_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_outbox(user_id: int, limit: int = 50) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT m.*, u.username as to_name, u.role as to_role FROM messages m LEFT JOIN users u ON m.to_user_id=u.id "
+        "WHERE m.from_user_id=? ORDER BY m.created_at DESC LIMIT ?", (user_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_message_read(msg_id: int, user_id: int) -> bool:
+    conn = _connect()
+    conn.execute("UPDATE messages SET is_read=1 WHERE id=? AND to_user_id=?", (msg_id, user_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_unread_count(user_id: int) -> int:
+    conn = _connect()
+    row = conn.execute("SELECT COUNT(*) as cnt FROM messages WHERE to_user_id=? AND is_read=0", (user_id,)).fetchone()
+    conn.close()
+    return row['cnt'] if row else 0
+
+
+# ========== 管理员设置 ==========
+
+def get_admin_setting(key: str, default: str = "") -> str:
+    conn = _connect()
+    row = conn.execute("SELECT setting_value FROM admin_settings WHERE setting_key=?", (key,)).fetchone()
+    conn.close()
+    return row['setting_value'] if row else default
+
+
+def set_admin_setting(key: str, value: str) -> bool:
+    conn = _connect()
+    conn.execute("INSERT OR REPLACE INTO admin_settings (setting_key, setting_value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+    return True
 
 
 def load_setting(user_id: int, key: str, default: str = "") -> str:

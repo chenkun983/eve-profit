@@ -20,9 +20,10 @@
 
   <nav class="nav-tabs">
     <button class="nav-tab active" onclick="switchTab('categories')">📦 市场查询</button>
-    <button class="nav-tab" onclick="switchTab('ranking')">🏆 利润排行</button>
+    <button id="tabRanking" class="nav-tab" onclick="switchTab('ranking')" style="display:none">🏆 利润排行</button>
     <button class="nav-tab" onclick="switchTab('estimate')">⛏ 矿物估价</button>
-    <button class="nav-tab disabled" disabled>🏭 工业管理</button>
+    <button id="tabIndustry" class="nav-tab" onclick="switchTab('industry')" style="display:none">🏭 工业管理</button>
+    <button id="tabOrders" class="nav-tab disabled" disabled>📋 订单系统</button>
   </nav>
 
   <div class="main-layout">
@@ -41,7 +42,10 @@
       <!-- 分类页面 -->
       <div id="pageCategories">
         <div class="search-box">
-          <input type="text" id="searchInput" placeholder="输入物品中文名搜索" autofocus oninput="searchInputChanged()">
+          <div style="display:flex;gap:8px">
+            <input type="text" id="searchInput" placeholder="输入物品中文名搜索" autofocus oninput="searchInputChanged()" style="flex:1">
+            <button onclick="var si=document.getElementById('searchInput');if(si&&si.value.trim()){var sr=document.getElementById('searchResults');var f=sr?sr.querySelector('.search-result-item'):null;if(f)f.click();else fetch('/api/search?q='+encodeURIComponent(si.value.trim())).then(function(r){return r.json()}).then(function(d){if(d.items&&d.items.length>0)selectItem(d.items[0].typeID,d.items[0].name);});}" style="padding:0 16px;border:1px solid #30363d;border-radius:8px;background:#1f6feb;color:#fff;font-size:14px;cursor:pointer">搜索</button>
+          </div>
           <div id="searchResults" class="search-results"></div>
         </div>
 
@@ -54,17 +58,17 @@
         </div>
 
         <div class="config-bar">
-          <div class="config-group">
+          <div class="config-group" style="flex-wrap:wrap;gap:6px 12px">
             <label>星系成本</label>
-            <input type="number" id="cfgSci" value="3" min="0" max="30" step="0.1"> %
-            <label>建筑效率</label>
-            <input type="number" id="cfgBonus" value="4" min="0" max="20" step="0.1"> %
+            <input type="number" id="cfgSci" value="3" min="0" max="30" step="0.1" style="width:55px"> %
             <label>设施税</label>
-            <input type="number" id="cfgTax" value="1" min="0" max="10" step="0.1"> %
-            <label>蓝图ME</label>
-            <input type="number" id="cfgMe" value="10" min="0" max="10" step="1">
-            <label>蓝图TE</label>
-            <input type="number" id="cfgTe" value="20" min="0" max="20" step="1">
+            <input type="number" id="cfgTax" value="1" min="0" max="10" step="0.1" style="width:55px"> %
+            <label>ME</label>
+            <input type="number" id="cfgMe" value="10" min="0" max="10" step="1" style="width:50px">
+            <label>TE</label>
+            <input type="number" id="cfgTe" value="20" min="0" max="20" step="1" style="width:50px">
+            <label>技能等级</label>
+            <input type="number" id="cfgSkillLv" value="5" min="0" max="5" step="1" style="width:40px">
           </div>
         </div>
 
@@ -74,12 +78,28 @@
       <!-- 排行页面 -->
       <div id="pageRanking" style="display:none"></div>
 
+      <!-- 工业管理页面 -->
+      <div id="pageIndustry" style="display:none"></div>
+
+      <!-- 订单系统页面（占位） -->
+      <div id="pageOrders" style="display:none">
+        <div class="industry-page">
+          <div style="text-align:center;padding:60px 20px;color:#8b949e">
+            <div style="font-size:40px;margin-bottom:16px">📋</div>
+            <h3 style="margin-bottom:8px">订单系统</h3>
+            <p style="font-size:14px">即将上线，敬请期待</p>
+          </div>
+        </div>
+      </div>
+
       <!-- 估价页面 -->
       <div id="pageEstimate" style="display:none">
         <div class="config-bar">
-          <div class="config-group">
-            <label>化矿率</label>
-            <input type="number" id="estRate" value="55" min="0" max="100" step="1"> %
+          <div class="config-group" style="gap:8px">
+            <label>矿石化矿率</label>
+            <input type="number" id="estOreRate" value="82.5" min="57" max="85" step="0.5" style="width:70px;padding:6px 8px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;font-size:14px"> %
+            <label style="margin-left:8px">其他化矿率</label>
+            <input type="number" id="estRate" value="55" min="55" max="55" step="0.5" disabled style="width:60px;padding:6px 8px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;font-size:14px;opacity:0.7"> %（固定）
             <button class="btn-primary" onclick="doEstimate()" style="padding:6px 16px">开始估价</button>
           </div>
         </div>
@@ -94,12 +114,15 @@
 
 <script src="/static/auth.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/industry.js"></script>
+<script src="/static/_patch.js"></script>
+<script src="/static/_patch2.js"></script>
 
 <!-- 登录弹窗 -->
 <div id="loginModal" class="modal" style="display:none">
   <div class="modal-content">
     <div class="modal-header">
-      <h3>登录 / 注册</h3>
+      <h3>登录</h3>
       <button class="modal-close" onclick="hideLogin()">✕</button>
     </div>
     <div class="modal-body">
@@ -108,8 +131,70 @@
       <div id="loginMsg" class="modal-msg"></div>
       <div class="modal-btns">
         <button class="btn-primary" onclick="doLogin()">登录</button>
-        <button class="btn-secondary" onclick="doRegister()">注册</button>
+        <button class="btn-secondary" onclick="hideLogin();showRegister()">注册账号</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 注册弹窗 -->
+<div id="registerModal" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>注册</h3>
+      <button class="modal-close" onclick="hideRegister()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="text" id="regUser" placeholder="用户名" class="modal-input">
+      <input type="password" id="regPass1" placeholder="密码" class="modal-input">
+      <input type="password" id="regPass2" placeholder="再次输入密码" class="modal-input">
+      <div id="regMsg" class="modal-msg"></div>
+      <div class="modal-btns">
+        <button class="btn-primary" onclick="doRegister()">注册</button>
+        <button class="btn-secondary" onclick="hideRegister();showLogin()">已有账号？登录</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 制造商申请/续费弹窗 -->
+<div id="appModal" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="appModalTitle">申请成为制造商</h3>
+      <button class="modal-close" onclick="hideAppModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="appRecipient" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-bottom:10px;font-size:13px;color:#8b949e">
+        游戏内收款人: <strong id="appRecipientName" style="color:#c9d1d9">加载中...</strong>
+      </div>
+      <div style="font-size:13px;color:#d29922;margin-bottom:10px">
+        请向以上收款人转账 <strong style="color:#3fb950">1,000,000,000 ISK</strong>，然后填写你的游戏角色名。
+      </div>
+      <input type="text" id="appCharName" placeholder="游戏角色名（必填）" class="modal-input">
+      <textarea id="appNotes" placeholder="备注（可选，如付款时间等）" class="modal-input" style="resize:vertical;min-height:60px"></textarea>
+      <div id="appMsg" class="modal-msg"></div>
+      <div class="modal-btns">
+        <button class="btn-primary" onclick="submitApplication()">提交申请</button>
+        <button class="btn-secondary" onclick="hideAppModal()">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 站内消息弹窗 -->
+<div id="msgModal" class="modal" style="display:none">
+  <div class="modal-content" style="width:600px;max-width:95vw;max-height:80vh;overflow-y:auto">
+    <div class="modal-header">
+      <h3>站内消息</h3>
+      <button class="modal-close" onclick="hideMsgModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px">
+        <button class="btn-primary" onclick="switchMsgTab('inbox')" id="msgTabInbox" style="margin-right:6px">收件箱</button>
+        <button class="btn-secondary" onclick="switchMsgTab('outbox')" id="msgTabOutbox">发件箱</button>
+      </div>
+      <div id="msgList"><div class="loading">加载中...</div></div>
     </div>
   </div>
 </div>
