@@ -147,7 +147,7 @@ function switchWHTab(ev, tab, wid) {
       setTimeout(function(){
         populateLineSelects(wid, d.configs||[]);
         // 给系数输入框绑定变更事件
-        ['timeSkill','timeBuild','timeRig','matRig','matBuild','matImplant'].forEach(function(id){
+        ['timeSkill','timeBuild','timeRig','timeImplant','matRig','matBuild','matImplant'].forEach(function(id){
           var el = document.getElementById(id);
           if (el) el.onchange = function(){ recalcAllLines(wid); saveLineCoeffs(wid); };
         });
@@ -271,7 +271,7 @@ function renderLinesTab(wid, configs) {
     '技能减时: <input id="timeSkill" type="number" value="32" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' 建筑减时: <input id="timeBuild" type="number" value="30" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' 插件减时: <input id="timeRig" type="number" value="30" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
-    ' 脑插减时: <input id="timeImplant" type="number" value="0" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
+    ' 脑插减时: <input id="timeImplant" type="number" value="0" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
     '</div>'+
     '<div style="margin-bottom:8px;font-size:12px;color:#8b949e;display:flex;gap:8px;flex-wrap:wrap">'+
     ' 插件减材: <input id="matRig" type="number" value="3.8" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
@@ -542,7 +542,7 @@ function checkAndStart(wid, lineNum) {
 function saveLineCoeffs(wid) {
   var getVal = function(id, def) {
     var el = document.getElementById(id);
-    return el ? (parseFloat(el.value) || def) : def;
+    return el ? (el.value!=='' ? parseFloat(el.value) : def) : def;
   };
   var coeffs = JSON.stringify({
     time_skill: getVal('timeSkill', 32),
@@ -978,6 +978,7 @@ function populateLineSelects(wid, configs) {
 }
 
 function recalcAllLines(wid) {
+  saveLineCoeffs(wid);
   for (var i = 1; i <= 20; i++) {
     var sel = document.getElementById('lpSel_'+i);
     if (sel && parseInt(sel.value) > 0) recalcLine(wid, i);

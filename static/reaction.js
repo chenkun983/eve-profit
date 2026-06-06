@@ -4,11 +4,11 @@ function renderReactLinesTab(wid, configs) {
     '<div style="margin-bottom:8px;font-size:12px;color:#8b949e;display:flex;gap:8px;flex-wrap:wrap">'+
     '技能减时: <input id="rcTimeSkill" type="number" value="32" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' 建筑减时: <input id="rcTimeBuild" type="number" value="30" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
-    ' 插件减时: <input id="rcTimeRig" type="number" value="30" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
+    ' 插件减时: <input id="rcTimeRig" type="number" value="30" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="saveRcCoeffs('+wid+')"> %'+
     ' 脑插减时: <input id="rcTimeImp" type="number" value="0" min="-10" max="100" step="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     '</div>'+
     '<div style="margin-bottom:8px;font-size:12px;color:#8b949e;display:flex;gap:8px;flex-wrap:wrap">'+
-    ' 插件减材: <input id="rcMatRig" type="number" value="3.8" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
+    ' 插件减材: <input id="rcMatRig" type="number" value="3.8" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="saveRcCoeffs('+wid+')"> %'+
     ' 建筑减材: <input id="rcMatBuild" type="number" value="0" min="0" max="5" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' 脑插减材: <input id="rcMatImp" type="number" value="0" min="0" max="5" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' <span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="saveRcCoeffs('+wid+');alert(\'参数已保存\')">💾 保存参数</span>'+
@@ -43,14 +43,15 @@ function renderReactLinesTab(wid, configs) {
 }
 
 function saveRcCoeffs(wid) {
+  var _r = function(id, def) { var e=document.getElementById(id); return e ? (e.value!==''?parseFloat(e.value):def) : def; };
   var coeffs = JSON.stringify({
-    time_skill: parseInt(document.getElementById('rcTimeSkill').value)||32,
-    time_build: parseInt(document.getElementById('rcTimeBuild').value)||30,
-    time_rig: parseInt(document.getElementById('rcTimeRig').value)||30,
-    time_imp: parseInt(document.getElementById('rcTimeImp').value)||0,
-    mat_rig: parseFloat(document.getElementById('rcMatRig').value)||3.8,
-    mat_build: parseFloat(document.getElementById('rcMatBuild').value)||0,
-    mat_imp: parseFloat(document.getElementById('rcMatImp').value)||0
+    time_skill: _r('rcTimeSkill', 32),
+    time_build: _r('rcTimeBuild', 30),
+    time_rig: _r('rcTimeRig', 30),
+    time_imp: _r('rcTimeImp', 0),
+    mat_rig: _r('rcMatRig', 3.8),
+    mat_build: _r('rcMatBuild', 0),
+    mat_imp: _r('rcMatImp', 0)
   });
   var tk = window.authToken || localStorage.getItem('auth_token');
   fetch('/api/industry/line-coeffs/save?warehouse_id='+wid+'&coeffs='+encodeURIComponent(coeffs)+'&prefix=rc_', { method: 'POST', headers: {'Authorization': 'Bearer '+tk} });
