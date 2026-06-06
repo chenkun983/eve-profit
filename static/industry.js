@@ -279,8 +279,6 @@ function renderLinesTab(wid, configs) {
     ' 脑插减材: <input id="matImplant" type="number" value="0" min="0" max="5" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
     ' 星系成本: <input id="lineSci" type="number" value="3" min="0" max="30" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
     ' 设施税: <input id="lineTax" type="number" value="1" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
-    ' ME: <input id="lineMe" type="number" value="10" min="0" max="10" step="1" style="width:40px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
-    ' TE: <input id="lineTe" type="number" value="20" min="0" max="20" step="1" style="width:40px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
     ' 技能等级: <input id="lineSkillLv" type="number" value="5" min="0" max="5" step="1" style="width:35px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
     ' <span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="saveLineCoeffs('+wid+');alert(\'参数已保存\')">💾 保存参数</span>'+
     '</div>'+
@@ -298,7 +296,7 @@ function renderLinesTab(wid, configs) {
       '<span style="font-weight:bold;font-size:12px">线 #'+(i+1)+'</span>'+
       '<span style="font-size:12px">产品: <select id="lpSel_'+(i+1)+'" style="padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="onLineProductChange('+wid+','+(i+1)+')">'+
       '<option value="0">— 未选择 —</option></select></span>'+
-      '<span style="font-size:12px">流程: <input id="lpQty_'+(i+1)+'" type="number" value="1" min="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+'<span style="font-size:12px" id="lpOut_'+(i+1)+'"></span>'+
+      '<span style="font-size:12px">流程: <input id="lpQty_'+(i+1)+'" type="number" value="1" min="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+'<span style="font-size:12px" id="lpOut_'+(i+1)+'"></span>'+'<span style="font-size:12px"> ME: <input id="lpME_'+(i+1)+'" type="number" value="10" min="0" max="10" step="1" style="width:45px;padding:3px 6px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:13px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+'<span style="font-size:12px"> TE: <input id="lpTE_'+(i+1)+'" type="number" value="20" min="0" max="20" step="1" style="width:45px;padding:3px 6px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:13px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+
       '<span style="font-size:12px">售价: <select id="lpPrice_'+(i+1)+'" style="padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="onPriceChange('+wid+','+(i+1)+')">'+
       '<option value="sell" '+(pm==='sell'?'selected':'')+'>最低卖单</option>'+
       '<option value="buy" '+(pm==='buy'?'selected':'')+'>最高收单</option>'+
@@ -353,8 +351,10 @@ function recalcLine(wid, lineNum) {
   var mr = parseFloat(document.getElementById('matRig').value) || 3.8;
   var mb = parseFloat(document.getElementById('matBuild').value) || 0;
   var mi = parseFloat(document.getElementById('matImplant').value) || 0;
+  var lme = parseInt(document.getElementById('lpME_'+lineNum).value) || 10;
+  var lte = parseInt(document.getElementById('lpTE_'+lineNum).value) || 20;
   fetch('/api/industry/line-cost?warehouse_id='+wid+'&line_number='+lineNum+'&product_type_id='+typeId+'&quantity='+qty+
-    '&price_mode='+pm+'&price_discount='+pd+'&custom_price='+cp+'&mat_rig='+mr+'&mat_build='+mb+'&mat_implant='+mi, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
+    '&price_mode='+pm+'&price_discount='+pd+'&custom_price='+cp+'&mat_rig='+mr+'&mat_build='+mb+'&mat_implant='+mi+'&line_me='+lme+'&line_te='+lte, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     if (!d.ok || !d.data) { el.innerHTML = '<span style="color:#da3633">计算失败</span>'; return; }
     var r = d.data;
     // 更新产出显示
@@ -609,7 +609,7 @@ function loadRunningCountdowns(wid) {
       var ln = parseInt(sel.id.replace('lpSel_',''));
       if (!runningLines[ln]) {
         // 恢复所有输入框、移除静态文本
-        var restoreIds = ['lpSel_'+ln, 'lpQty_'+ln, 'lpPrice_'+ln, 'lpDisc_'+ln, 'lpCust_'+ln];
+        var restoreIds = ['lpSel_'+ln, 'lpQty_'+ln, 'lpPrice_'+ln, 'lpDisc_'+ln, 'lpCust_'+ln, 'lpME_'+ln, 'lpTE_'+ln];
         for (var ri = 0; ri < restoreIds.length; ri++) {
           var inp2 = document.getElementById(restoreIds[ri]);
           if (inp2) inp2.style.display = '';
@@ -674,8 +674,8 @@ function loadRunningCountdowns(wid) {
 }
 
 function hideLineInputs(lineNum, wid, prodName) {
-  var inputIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum];
-  var labelMap = {'lpQty_':'数量: ','lpPrice_':'售价: ','lpDisc_':'折扣: ','lpCust_':'自定义: '};
+  var inputIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum, 'lpME_'+lineNum, 'lpTE_'+lineNum];
+  var labelMap = {'lpQty_':'数量: ','lpPrice_':'售价: ','lpDisc_':'折扣: ','lpCust_':'自定义: ','lpME_':'ME: ','lpTE_':'TE: '};
   for (var ii = 0; ii < inputIds.length; ii++) {
     var inp = document.getElementById(inputIds[ii]);
     if (!inp) continue;
@@ -708,7 +708,7 @@ function collectAndReset(jobId, wid, lineNum) {
   fetch('/api/industry/collect?job_id='+jobId, { method: 'POST', headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     if (d.ok) {
       // 重置生产线：恢复所有输入框、移除静态文本
-      var restoreIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum];
+      var restoreIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum, 'lpME_'+lineNum, 'lpTE_'+lineNum];
       for (var ri = 0; ri < restoreIds.length; ri++) {
         var inp = document.getElementById(restoreIds[ri]);
         if (inp) inp.style.display = '';

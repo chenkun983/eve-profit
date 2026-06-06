@@ -721,6 +721,7 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
                          custom_price: float = Query(0),
                          mat_rig: float = Query(3.8),
                          mat_build: float = Query(0), mat_implant: float = Query(0),
+                         line_me: int = Query(None), line_te: int = Query(None),
                          authorization: str = Header(None)):
     uid = _require_user(authorization)
     from core.database import SDEDatabase
@@ -750,8 +751,8 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
     # 前台存的是百分比数值（如3=3%），转十进制
     if line_sci > 0.5: line_sci = line_sci / 100
     if line_tax > 0.5: line_tax = line_tax / 100
-    line_me = int(line_cfg.get('line_me', prod_config.get('me', 10)))
-    line_te = int(line_cfg.get('line_te', prod_config.get('te', 20)))
+    line_me = line_me if line_me is not None else int(line_cfg.get('line_me', prod_config.get('me', 10)))
+    line_te = line_te if line_te is not None else int(line_cfg.get('line_te', prod_config.get('te', 20)))
     line_skill_lv = int(line_cfg.get('line_skill', 5))
     line_skill_factor = 1.25 - 0.05 * line_skill_lv
 

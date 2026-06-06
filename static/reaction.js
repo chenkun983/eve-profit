@@ -35,7 +35,7 @@ function renderReactLinesTab(wid, configs) {
       ' <span id="rcCustWrap_'+(i+1)+'" style="'+(pm==='custom'?'':'display:none')+'"><input id="rcCust_'+(i+1)+'" type="number" value="'+cp+'" min="0" step="10000" style="width:80px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" placeholder="单价" onchange="onRcChange('+wid+','+(i+1)+')"> ISK</span>'+
       '</div>'+
       '<div id="rcProfit_'+i+'" style="font-size:12px;color:#8b949e">— 选择产品后将显示成本与利润</div>'+
-      '<div id="rcMats_'+i+'" style="font-size:11px;color:#8b949e;margin-top:4px"></div>'+
+      ''+
       '</div>';
   }
   h += '</div><div id="rcShortage" style="margin-top:10px"></div></div>';
@@ -147,12 +147,14 @@ function recalcRcLine(wid, lineNum) {
     var profit = r.total_revenue - r.bp_cost;
     var margin = r.bp_cost > 0 ? (profit / r.bp_cost * 100).toFixed(1) : 0;
     el.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:2px">'+
-      '<div><span style="color:#8b949e">材料成本</span><br><strong>'+fmt(r.bp_cost)+'</strong>'+
-      '<br><span style="color:'+(profit>=0?'#3fb950':'#da3633')+';font-size:11px">利润 '+fmt(profit)+' ('+margin+'%)</span></div>'+
+      '<div><span style="color:#8b949e">反应公式材料成本</span><br><strong>'+fmt(r.bp_cost)+'</strong></div>'+
+      '<div><span style="color:#8b949e">基础材料成本</span><br><strong>'+fmt(r.deep_cost)+'</strong></div>'+
       '<div><span style="color:#8b949e">总售价</span><br><strong style="color:#58a6ff">'+fmt(r.total_revenue)+'</strong></div>'+
       '</div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:4px">'+
+      '<div><span style="color:#8b949e">利润</span><br><strong style="color:'+(profit>=0?'#3fb950':'#da3633')+'">'+fmt(profit)+' ('+margin+'%)</strong></div>'+
+      '</div>'
       '<div style="margin-top:6px"><span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="startReaction('+wid+','+lineNum+','+typeId+','+qty+')">▶ 启动反应</span></div>';
-    loadRcMaterialList(wid, lineNum, typeId, qty);
   });
 }
 
