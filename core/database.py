@@ -33,20 +33,20 @@ class SDEDatabase:
         row = conn.execute("SELECT typeName FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
         return row['typeName'] if row else str(type_id)
 
-    def get_manufacturing_materials(self, product_type_id: int) -> dict:
+    def get_manufacturing_materials(self, product_type_id: int, activity_id: int = 1) -> dict:
         conn = self._connect()
         bp_row = conn.execute(
             "SELECT typeID, quantity as outputQty FROM industryActivityProducts "
-            "WHERE productTypeID=? AND activityID=1",
-            (product_type_id,)
+            "WHERE productTypeID=? AND activityID=?",
+            (product_type_id, activity_id)
         ).fetchone()
         if not bp_row:
             return {}
         bp_type_id = bp_row['typeID']
         materials = conn.execute(
             "SELECT materialTypeID, quantity FROM industryActivityMaterials "
-            "WHERE typeID=? AND activityID=1",
-            (bp_type_id,)
+            "WHERE typeID=? AND activityID=?",
+            (bp_type_id, activity_id)
         ).fetchall()
         return {row['materialTypeID']: row['quantity'] for row in materials}
 

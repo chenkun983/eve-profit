@@ -434,6 +434,7 @@ from core.industry import (rebuild_material_cache, rebuild_production_cache,
     search_materials, is_material, is_manufacturable, search_manufacturable, search_reactions,
     list_warehouses, create_warehouse, update_warehouse, delete_warehouse,
     get_line_configs, save_line_config, set_line_count,
+    get_reaction_configs, save_reaction_config, set_reaction_count,
     get_warehouse_config, save_warehouse_config,
     get_inventory, get_all_inventory, import_inventory, manual_add_material,
     parse_game_clipboard, calculate_material_requirements,
@@ -457,6 +458,10 @@ async def api_rebuild_cache(authorization: str = Header(None)):
 @app.get("/api/industry/search-materials")
 async def api_search_materials(q: str = Query("")):
     return {"ok": True, "materials": search_materials(q)}
+
+@app.get("/api/industry/search-reactions")
+async def api_search_reactions(q: str = Query(""), limit: int = Query(20)):
+    return {"ok": True, "materials": search_reactions(q, limit)}
 
 @app.get("/api/industry/check-manufacturable")
 async def api_check_manufacturable(type_ids: str = Query("")):
@@ -500,6 +505,28 @@ async def api_line_configs(warehouse_id: int = Query(...), authorization: str = 
     _require_user(authorization)
     return {"ok": True, "configs": get_line_configs(warehouse_id)}
 
+@app.get("/api/industry/reaction-configs")
+async def api_reaction_configs(warehouse_id: int = Query(...), authorization: str = Header(None)):
+    _require_user(authorization)
+    return {"ok": True, "configs": get_reaction_configs(warehouse_id)}
+
+@app.post("/api/industry/reaction-config/save")
+async def api_save_reaction_config(warehouse_id: int = Query(...), line_number: int = Query(...),
+                                   product_type_id: int = Query(0),
+                                   price_mode: str = Query('sell'), price_discount: float = Query(1.0),
+                                   custom_price: float = Query(0),
+                                   authorization: str = Header(None)):
+    _require_user(authorization)
+    ok = save_reaction_config(warehouse_id, line_number, product_type_id, price_mode, price_discount, custom_price)
+    return {"ok": ok}
+
+@app.post("/api/industry/reaction-count")
+async def api_reaction_count(warehouse_id: int = Query(...), count: int = Query(5),
+                              authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = set_reaction_count(warehouse_id, uid, count)
+    return {"ok": ok, "message": msg}
+
 @app.get("/api/industry/warehouse-config")
 async def api_warehouse_config(warehouse_id: int = Query(...), authorization: str = Header(None)):
     uid = _require_user(authorization)
@@ -534,12 +561,128 @@ async def api_set_line_count(warehouse_id: int = Query(...), count: int = Query(
     ok, msg = set_line_count(warehouse_id, uid, count)
     return {"ok": ok, "message": msg}
 
+@app.get("/api/industry/reaction-cost")
+async def api_reaction_cost(warehouse_id: int = Query(...), line_number: int = Query(...),
+                            product_type_id: int = Query(...), quantity: int = Query(1),
+                            price_mode: str = Query('sell'), price_discount: float = Query(1.0),
+                            custom_price: float = Query(0),
+                            authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.database import SDEDatabase
+    sde = SDEDatabase()
+    mats = sde.get_manufacturing_materials(product_type_id, activity_id=11)
+    if not mats:
+        return {"ok": False, "message": "无反应配方"}
+    # 获取单流程产出数量
+    from core.database import SDEDatabase as _SDE
+    _sde2 = _SDE()
+    _conn2 = _sde2._connect()
+    _oq = _conn2.execute("SELECT quantity FROM industryActivityProducts WHERE productTypeID=? AND activityID=11", (product_type_id,)).fetchone()
+    output_qty = _oq['quantity'] if _oq else 1
+    _conn2.close()
+    type_ids = list(mats.keys()) + [product_type_id]
+    prices = market.get_prices_batch(type_ids)
+    total = 0
+    for mid, qty in mats.items():
+        mp = prices.get(mid, {})
+        total += (mp.get('sell_min', 0) or 0) * qty * quantity
+    prod_p = prices.get(product_type_id, {})
+    market_sell = prod_p.get('sell_min', 0)
+    market_buy = prod_p.get('buy_max', 0)
+    if price_mode == 'sell':
+        unit_price = market_sell * price_discount
+    elif price_mode == 'buy':
+        unit_price = market_buy * price_discount
+    else:
+        unit_price = custom_price
+    revenue = round(unit_price * output_qty * quantity, 2)
+    total = round(total, 2)
+    profit = round(revenue - total, 2)
+    margin = round((profit / total * 100), 2) if total > 0 else 0
+    return {
+        "ok": True,
+        "data": {
+            "product_name": sde.get_chinese_name(product_type_id),
+            "output_qty": output_qty,
+            "bp_cost": total, "deep_cost": total,
+            "market_sell": market_sell, "market_buy": market_buy,
+            "unit_price": round(unit_price, 2), "total_revenue": revenue,
+            "profit_bp": profit, "profit_deep": profit,
+            "margin_bp": margin, "margin_deep": margin,
+            "prod_time": sde.get_manufacturing_time(product_type_id)
+        }
+    }
+
+@app.get("/api/industry/reaction-materials")
+async def api_reaction_materials(type_id: int = Query(...), quantity: int = Query(1),
+                                   authorization: str = Header(None)):
+    """获取反应产物的材料清单"""
+    uid = _require_user(authorization)
+    from core.database import SDEDatabase
+    sde = SDEDatabase()
+    mats = sde.get_manufacturing_materials(type_id, activity_id=11)
+    if not mats:
+        return {"ok": False, "materials": []}
+    result = []
+    for mid, qty_per_run in mats.items():
+        result.append({
+            'type_id': mid,
+            'name': sde.get_chinese_name(mid),
+            'quantity': qty_per_run * quantity
+        })
+    return {"ok": True, "materials": result}
+
+@app.post("/api/industry/start-reaction")
+async def api_start_reaction(warehouse_id: int = Query(...), line_number: int = Query(...),
+                              product_type_id: int = Query(...), quantity: int = Query(1),
+                              authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.database import SDEDatabase
+    from core.auth import _connect
+    sde = SDEDatabase()
+    conn = _connect()
+    # 检查库存并扣料
+    mats = sde.get_manufacturing_materials(product_type_id, activity_id=11)
+    if not mats:
+        return {"ok": False, "message": "无反应配方"}
+    shortage = []
+    for mid, base_qty in mats.items():
+        need = base_qty * quantity
+        row = conn.execute("SELECT quantity FROM warehouse_inventory WHERE warehouse_id=? AND type_id=?",
+                          (warehouse_id, mid)).fetchone()
+        avail = row['quantity'] if row else 0
+        if avail < need:
+            shortage.append(sde.get_chinese_name(mid))
+        else:
+            conn.execute("UPDATE warehouse_inventory SET quantity=quantity-? WHERE warehouse_id=? AND type_id=?",
+                        (need, warehouse_id, mid))
+    if shortage:
+        conn.close()
+        return {"ok": False, "message": "材料不足: " + ', '.join(shortage)}
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    end_time = now + timedelta(seconds=sde.get_manufacturing_time(product_type_id))
+    conn.execute(
+        "INSERT INTO production_jobs (warehouse_id, line_number, user_id, product_type_id, quantity, activity_type, "
+        "started_at, estimated_end_at, status) VALUES (?, ?, ?, ?, ?, 'reaction', datetime('now'), ?, 'running')",
+        (warehouse_id, line_number, uid, product_type_id, quantity,
+         end_time.strftime('%Y-%m-%d %H:%M:%S')))
+    job_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+    return {"ok": True, "result": {
+        "job_id": job_id,
+        "product_name": sde.get_chinese_name(product_type_id),
+        "estimated_end_at": end_time.strftime('%Y-%m-%d %H:%M:%S')
+    }}
+
 # ---- 生产线系数保存 ----
 @app.get("/api/industry/line-coeffs")
-async def api_line_coeffs(warehouse_id: int = Query(...), authorization: str = Header(None)):
+async def api_line_coeffs(warehouse_id: int = Query(...), prefix: str = Query(''), authorization: str = Header(None)):
     uid = _require_user(authorization)
     from core.auth import load_setting
-    val = load_setting(uid, f"line_coeffs_{warehouse_id}", "{}")
+    key = f"{prefix}line_coeffs_{warehouse_id}" if prefix else f"line_coeffs_{warehouse_id}"
+    val = load_setting(uid, key, "{}")
     try:
         import json
         coeffs = json.loads(val)
@@ -549,11 +692,26 @@ async def api_line_coeffs(warehouse_id: int = Query(...), authorization: str = H
 
 @app.post("/api/industry/line-coeffs/save")
 async def api_save_line_coeffs(warehouse_id: int = Query(...), coeffs: str = Query("{}"),
-                               authorization: str = Header(None)):
+                               prefix: str = Query(''), authorization: str = Header(None)):
     uid = _require_user(authorization)
     from core.auth import save_setting
-    save_setting(uid, f"line_coeffs_{warehouse_id}", coeffs)
+    key = f"{prefix}line_coeffs_{warehouse_id}" if prefix else f"line_coeffs_{warehouse_id}"
+    save_setting(uid, key, coeffs)
     return {"ok": True}
+
+@app.get("/api/industry/line-coeffs/load")
+async def api_load_line_coeffs(warehouse_id: int = Query(...), prefix: str = Query(''),
+                                authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import load_setting
+    import json
+    key = f"{prefix}line_coeffs_{warehouse_id}" if prefix else f"line_coeffs_{warehouse_id}"
+    val = load_setting(uid, key, "{}")
+    try:
+        coeffs = json.loads(val)
+    except:
+        coeffs = {}
+    return {"ok": True, "coeffs": coeffs}
 
 # ---- 生产线成本与利润（使用仓库加成）----
 @app.get("/api/industry/line-cost")
@@ -619,6 +777,7 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
                 sys_c = mo.get('system_cost', 0)
                 fac_t = mo.get('facility_tax', 0)
                 bp_total = round(mat_eff * line_mat_factor + sys_c + fac_t, 2)
+                output_qty = mo.get('product_quantity', 1) or 1
                 break
     if not bp_total:
         return {"ok": False, "message": "无法计算成本"}
@@ -659,7 +818,7 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
     else:
         unit_price = custom_price
 
-    total_revenue = round(unit_price * quantity, 2)
+    total_revenue = round(unit_price * output_qty * quantity, 2)
 
     return {
         "ok": True,
@@ -667,6 +826,7 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
             "product_name": sde.get_chinese_name(product_type_id),
             "bp_cost": bp_total,
             "deep_cost": deep_total,
+            "output_qty": output_qty,
             "market_sell": market_sell,
             "market_buy": market_buy,
             "unit_price": round(unit_price, 2),

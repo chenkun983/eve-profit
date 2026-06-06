@@ -85,10 +85,12 @@ function showWarehouse(wid) {
       '<span style="cursor:pointer;color:#da3633" onclick="deleteWarehouse('+wid+')">🗑 删除</span>'+
       '</div></div>';
 
+
     // Tab 切换
     h += '<div class="profit-tabs" style="margin-bottom:12px">'+
       '<button class="profit-tab" onclick="switchWHTab(event,\'inventory\','+wid+')">📦 库存</button>'+
       '<button class="profit-tab active" onclick="switchWHTab(event,\'lines\','+wid+')">🔧 生产线</button>'+
+      '<button class="profit-tab" onclick="switchWHTab(event,\'reaction\','+wid+')">🧪 反应线</button>'+
       '<button class="profit-tab" onclick="switchWHTab(event,\'production\','+wid+')">📜 历史</button>'+
       '</div><div id="whTabContent">';
 
@@ -170,6 +172,14 @@ function switchWHTab(ev, tab, wid) {
   } else if (tab === 'production') {
     fetch('/api/industry/jobs?warehouse_id='+wid, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
       area.innerHTML = renderProductionTab(wid, d.jobs||[]);
+    });
+  } else if (tab === 'reaction') {
+    fetch('/api/industry/reaction-configs?warehouse_id='+wid, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
+      area.innerHTML = renderReactLinesTab(wid, d.configs||[]);
+      setTimeout(function(){
+        populateReactionSelects(wid, d.configs||[]);
+        loadRcCoeffs(wid);
+      }, 100);
     });
   }
 }
@@ -288,7 +298,7 @@ function renderLinesTab(wid, configs) {
       '<span style="font-weight:bold;font-size:12px">线 #'+(i+1)+'</span>'+
       '<span style="font-size:12px">产品: <select id="lpSel_'+(i+1)+'" style="padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="onLineProductChange('+wid+','+(i+1)+')">'+
       '<option value="0">— 未选择 —</option></select></span>'+
-      '<span style="font-size:12px">数量: <input id="lpQty_'+(i+1)+'" type="number" value="1" min="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+
+      '<span style="font-size:12px">流程: <input id="lpQty_'+(i+1)+'" type="number" value="1" min="1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="recalcLine('+wid+','+(i+1)+')"></span>'+'<span style="font-size:12px" id="lpOut_'+(i+1)+'"></span>'+
       '<span style="font-size:12px">售价: <select id="lpPrice_'+(i+1)+'" style="padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#c9d1d9;font-size:12px" onchange="onPriceChange('+wid+','+(i+1)+')">'+
       '<option value="sell" '+(pm==='sell'?'selected':'')+'>最低卖单</option>'+
       '<option value="buy" '+(pm==='buy'?'selected':'')+'>最高收单</option>'+
@@ -347,7 +357,9 @@ function recalcLine(wid, lineNum) {
     '&price_mode='+pm+'&price_discount='+pd+'&custom_price='+cp+'&mat_rig='+mr+'&mat_build='+mb+'&mat_implant='+mi, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     if (!d.ok || !d.data) { el.innerHTML = '<span style="color:#da3633">计算失败</span>'; return; }
     var r = d.data;
-    console.log('line-cost debug:', r._debug_config);
+    // 更新产出显示
+    var outEl = document.getElementById('lpOut_'+lineNum);
+    if (outEl && r.output_qty) outEl.textContent = ' × '+r.output_qty+'件/流程 = '+(r.output_qty*qty)+'件';
     var h = '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:2px">'+
       '<div><span style="color:#8b949e">蓝图材料总成本</span><br><strong>'+fmt(r.bp_cost)+'</strong>'+
       '<br><span style="color:'+(r.profit_bp>=0?'#3fb950':'#da3633')+';font-size:11px">利润 '+fmt(r.profit_bp)+' ('+r.margin_bp+'%)</span></div>'+
