@@ -430,7 +430,8 @@ async def api_set_role(user_id: int = Query(...), role: str = Query("user"),
     ok, msg = set_role(admin_id, user_id, role, days)
     return {"ok": ok, "message": msg}
 
-from core.industry import (rebuild_material_cache, search_materials, is_material,
+from core.industry import (rebuild_material_cache, rebuild_production_cache,
+    search_materials, is_material, is_manufacturable, search_manufacturable, search_reactions,
     list_warehouses, create_warehouse, update_warehouse, delete_warehouse,
     get_line_configs, save_line_config, set_line_count,
     get_warehouse_config, save_warehouse_config,
@@ -450,11 +451,21 @@ async def api_rebuild_cache(authorization: str = Header(None)):
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可操作")
     count = rebuild_material_cache()
-    return {"ok": True, "count": count}
+    prod_count, react_count = rebuild_production_cache()
+    return {"ok": True, "count": count, "products": prod_count, "reactions": react_count}
 
 @app.get("/api/industry/search-materials")
 async def api_search_materials(q: str = Query("")):
     return {"ok": True, "materials": search_materials(q)}
+
+@app.get("/api/industry/check-manufacturable")
+async def api_check_manufacturable(type_ids: str = Query("")):
+    """批量检查 type_id 是否可制造"""
+    ids = [int(x) for x in type_ids.split(',') if x.strip().isdigit()]
+    result = {}
+    for tid in ids:
+        result[str(tid)] = is_manufacturable(tid)
+    return {"ok": True, "result": result}
 
 # ---- 分仓库 ----
 @app.get("/api/industry/warehouses")
@@ -559,65 +570,68 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
     from core.auth import load_material_overrides
 
     sde = SDEDatabase()
-    # 读取保存的配置（每个产品独立）
+    # 读取分仓库的生产参数（优先），没有则从产品配置取
+    from core.auth import load_setting
+    import json as _json
+    line_cfg_str = load_setting(uid, f'line_coeffs_{warehouse_id}', '{}')
+    try:
+        line_cfg = _json.loads(line_cfg_str)
+    except:
+        line_cfg = {}
+    # 产品级别的定价配置
     overrides = load_material_overrides(uid, product_type_id)
-    config = overrides.get('-1', {})
-    if isinstance(config, str):
+    prod_config = overrides.get('-1', {})
+    if isinstance(prod_config, str):
         try:
-            config = json.loads(config)
+            prod_config = _json.loads(prod_config)
         except:
-            config = {}
-    me = config.get('me', 10)
-    te = config.get('te', 20)
+            prod_config = {}
+    # 优先用分仓库参数，没有则用产品配置
+    line_sci = line_cfg.get('line_sci', prod_config.get('sci', 0.03))
+    line_tax = line_cfg.get('line_tax', prod_config.get('tax', 0.01))
+    # 前台存的是百分比数值（如3=3%），转十进制
+    if line_sci > 0.5: line_sci = line_sci / 100
+    if line_tax > 0.5: line_tax = line_tax / 100
+    line_me = int(line_cfg.get('line_me', prod_config.get('me', 10)))
+    line_te = int(line_cfg.get('line_te', prod_config.get('te', 20)))
+    line_skill_lv = int(line_cfg.get('line_skill', 5))
+    line_skill_factor = 1.25 - 0.05 * line_skill_lv
 
     mfg_cfg = ManufacturingConfig(
-        blueprint_me_level=me, blueprint_te_level=te,
-        system_cost_index=config.get('sci', 0.03),
-        facility_tax=config.get('tax', 0.01)
+        blueprint_me_level=line_me, blueprint_te_level=line_te,
+        system_cost_index=line_sci,
+        facility_tax=line_tax
     )
     calc = ProfitCalculator(sde, market, mfg_cfg)
 
-    # 读取保存的材料定价 + 比率
-    ov_dict = {}
-    ratios = {}
-    for k, v in overrides.items():
-        try:
-            kid = int(k)
-            if kid > 0:
-                ov_dict[str(kid)] = v  # string key 匹配 calculate_with_modes 的 str(mid)
-        except:
-            pass
-    ratios_raw = overrides.get('-2', {})
-    if isinstance(ratios_raw, dict):
-        ratios = {str(int(k)): float(v) for k, v in ratios_raw.items()}
+    line_mat_factor = line_skill_factor * ((100 - mat_rig) / 100) * ((100 - mat_build) / 100) * ((100 - mat_implant) / 100)
 
-    # 从 realistic 模式取蓝图材料总成本
-    bp_result = calc.calculate_with_modes(product_type_id, material_overrides=ov_dict, material_ratios=ratios, use_bom=False)
+    bp_result = calc.calculate_with_modes(product_type_id, use_bom=False)
     if not bp_result:
         return {"ok": False, "message": "无配方"}
 
-    # 生产线减材系数
-    line_mat_factor = ((100 - mat_rig) / 100) * ((100 - mat_build) / 100) * ((100 - mat_implant) / 100)
-
-    # 从 realistic 模式取蓝图材料总成本，再乘生产线减材系数
+    # 从 realistic 模式取蓝图材料成本，减去材系数后重算税费
     bp_total = 0
     if bp_result.get('modes'):
         for mo in bp_result['modes']:
-            if mo.get('key') == 'realistic' and mo.get('total_cost'):
-                bp_total = round(mo['total_cost'] * line_mat_factor, 2)
+            if mo.get('key') == 'realistic' and mo.get('material_cost_eff'):
+                mat_eff = mo['material_cost_eff']
+                sys_c = mo.get('system_cost', 0)
+                fac_t = mo.get('facility_tax', 0)
+                bp_total = round(mat_eff * line_mat_factor + sys_c + fac_t, 2)
                 break
     if not bp_total:
         return {"ok": False, "message": "无法计算成本"}
 
     prod_time = sde.get_manufacturing_time(product_type_id)
-    te_factor = 1.0 - (te * 0.01)  # 每级 1%
+    te_factor = 1.0 - (line_te * 0.01)  # 每级 1%
     if te_factor < 0.5:
         te_factor = 0.5
     adjusted_time = int(prod_time * te_factor)
 
     # 基础材料（BOM）成本和税费
     try:
-        bom_result = calc.calculate_with_modes(product_type_id, material_overrides=ov_dict, material_ratios=ratios, use_bom=True)
+        bom_result = calc.calculate_with_modes(product_type_id, use_bom=True)
         raw_deep = 0
         if bom_result:
             raw_deep = sum((bm.get('total_sell', 0) or 0) for bm in (bom_result.get('deep_materials') or []))
@@ -630,7 +644,7 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
         if raw_deep:
             sci_rate = mfg_cfg.system_cost_index or 0
             tax_rate = mfg_cfg.facility_tax or 0
-            deep_total = round((raw_deep + raw_deep * sci_rate + raw_deep * tax_rate) * line_mat_factor, 2)
+            deep_total = round(raw_deep * line_mat_factor + raw_deep * sci_rate + raw_deep * tax_rate, 2)
     except Exception as e:
         deep_total = 0
 
@@ -663,7 +677,12 @@ async def api_line_cost(warehouse_id: int = Query(...), line_number: int = Query
             "margin_deep": round(((total_revenue - deep_total) / deep_total * 100), 2) if deep_total > 0 else 0,
             "prod_time": adjusted_time,
             "_debug_config": {
-                "me": me, "te": te
+                "me": line_me, "te": line_te,
+                "line_sci": line_sci, "line_tax": line_tax,
+                "line_mat_factor": round(line_mat_factor, 4),
+                "mat_eff": round(mat_eff, 2),
+                "sys_c": round(sys_c, 2),
+                "fac_t": round(fac_t, 2)
             }
         }
     }
@@ -717,6 +736,24 @@ async def api_start_production(warehouse_id: int = Query(...), line_number: int 
     ok, result = start_production(warehouse_id, line_number, uid, product_type_id, quantity,
                                   time_skill, time_build, time_rig, mat_rig, mat_build, mat_implant)
     return {"ok": ok, "result": result if isinstance(result, dict) else None, "message": result if isinstance(result, str) else None}
+
+@app.post("/api/industry/mark-completed/{job_id}")
+async def api_mark_completed(job_id: int, authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.auth import _connect
+    conn = _connect()
+    row = conn.execute(
+        "SELECT p.status, sw.user_id as owner_id FROM production_jobs p "
+        "JOIN sub_warehouses sw ON p.warehouse_id=sw.id WHERE p.id=?", (job_id,)).fetchone()
+    if not row or row['owner_id'] != uid:
+        conn.close()
+        return {"ok": False}
+    if row['status'] == 'running':
+        conn.execute("UPDATE production_jobs SET status='completed', actual_end_at=datetime('now') WHERE id=?", (job_id,))
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
 
 @app.post("/api/industry/collect")
 async def api_collect(job_id: int = Query(...), authorization: str = Header(None)):

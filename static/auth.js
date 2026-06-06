@@ -487,7 +487,7 @@ function rebuildMaterialCache() {
   var btn = event.target;
   btn.disabled = true; btn.textContent = '重建中...';
   fetch('/api/industry/rebuild-cache', { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
-    alert('缓存已重建，共 '+d.count+' 种原料');
+    alert('缓存已重建，原料 '+d.count+' 种，可制造 '+d.products+' 种，反应 '+d.reactions+' 种');
     btn.disabled = false; btn.textContent = '重建缓存';
   }).catch(function(){ alert('重建失败'); btn.disabled = false; btn.textContent = '重建缓存'; });
 }

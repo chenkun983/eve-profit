@@ -124,8 +124,13 @@ function showWarehouse(wid) {
 
 function switchWHTab(ev, tab, wid) {
   var tabs = document.querySelectorAll('#pageIndustry .profit-tab');
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
-  ev.target.classList.add('active');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.remove('active');
+    // 按 tab 名称高亮对应按钮
+    if (tabs[i].getAttribute('onclick') && tabs[i].getAttribute('onclick').indexOf("'"+tab+"'") > -1) {
+      tabs[i].classList.add('active');
+    }
+  }
   var tk = window.authToken || localStorage.getItem('auth_token');
   var area = document.getElementById('whTabContent');
   area.innerHTML = '<div class="loading">加载中...</div>';
@@ -262,6 +267,11 @@ function renderLinesTab(wid, configs) {
     ' 插件减材: <input id="matRig" type="number" value="3.8" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
     ' 建筑减材: <input id="matBuild" type="number" value="0" min="0" max="5" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
     ' 脑插减材: <input id="matImplant" type="number" value="0" min="0" max="5" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="recalcAllLines('+wid+')"> %'+
+    ' 星系成本: <input id="lineSci" type="number" value="3" min="0" max="30" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
+    ' 设施税: <input id="lineTax" type="number" value="1" min="0" max="10" step="0.1" style="width:50px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px"> %'+
+    ' ME: <input id="lineMe" type="number" value="10" min="0" max="10" step="1" style="width:40px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
+    ' TE: <input id="lineTe" type="number" value="20" min="0" max="20" step="1" style="width:40px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
+    ' 技能等级: <input id="lineSkillLv" type="number" value="5" min="0" max="5" step="1" style="width:35px;padding:2px 4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
     ' <span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="saveLineCoeffs('+wid+');alert(\'参数已保存\')">💾 保存参数</span>'+
     '</div>'+
     '<div style="margin-bottom:8px;font-size:12px;color:#8b949e">数量: <input id="lineCountInput" type="number" value="'+configs.length+'" min="1" max="20" style="width:50px;padding:4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
@@ -528,6 +538,11 @@ function saveLineCoeffs(wid) {
     time_rig: getVal('timeRig', 30),
     time_implant: getVal('timeImplant', 0),
     mat_rig: getVal('matRig', 3.8),
+    line_sci: getVal('lineSci', 3),
+    line_tax: getVal('lineTax', 1),
+    line_me: getVal('lineMe', 10),
+    line_te: getVal('lineTe', 20),
+    line_skill: getVal('lineSkillLv', 5),
     mat_build: getVal('matBuild', 0),
     mat_implant: getVal('matImplant', 0)
   });
@@ -537,12 +552,39 @@ function saveLineCoeffs(wid) {
 
 function loadRunningCountdowns(wid) {
   var tk = window.authToken || localStorage.getItem('auth_token');
-  // 清除该仓库所有旧倒计时
-  if (window._cdInts) {
-    for (var k in window._cdInts) {
-      if (k.startsWith(wid+'_')) { clearInterval(window._cdInts[k]); delete window._cdInts[k]; }
-    }
-  } else { window._cdInts = {}; }
+  // 清除所有 cd 元素的旧 interval（存在 data-cd-int 里）
+  document.querySelectorAll('[id^="cd_"]').forEach(function(el){
+    var oldInt = el.getAttribute('data-cd-int');
+    if (oldInt) { clearInterval(parseInt(oldInt)); }
+  });
+  // 启动全局倒计时（每秒更新一次所有 cd_ 元素）
+  if (!window._cdTimer) {
+    window._cdTimer = setInterval(function(){
+      document.querySelectorAll('[id^="cd_"]').forEach(function(el){
+        // 已有交付按钮的跳过，避免覆盖按钮
+        if (el.getAttribute('data-btn-added')) return;
+        var endStr = el.getAttribute('data-end');
+        if (!endStr) return;
+        var endDate = new Date(endStr);
+        if (isNaN(endDate)) return;
+        var diff = endDate - new Date();
+        if (diff <= 0) {
+          el.innerHTML = '⏰ 已完成';
+          if (!el.getAttribute('data-btn-added')) {
+            el.setAttribute('data-btn-added', '1');
+            var p = el.id.split('_');
+            if (p.length>=3) el.innerHTML += ' <span style="font-size:12px;color:#3fb950;cursor:pointer" onclick="collectAndReset(0,'+p[2]+','+p[1]+')">📦 交付</span>';
+          }
+          return;
+        }
+        var h = Math.floor(diff / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var s = Math.floor((diff % 60000) / 1000);
+        // 用 innerHTML 避免覆盖按钮
+        el.innerHTML = '⏱ ' + h + 'h ' + m + 'm ' + s + 's';
+      });
+    }, 1000);
+  }
   fetch('/api/industry/jobs?warehouse_id='+wid+'&status=running', { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     var jobs = d.jobs || [];
     // 不重置有运行中任务的线的产品选择
@@ -554,8 +596,15 @@ function loadRunningCountdowns(wid) {
       var sel = allLineEls[i];
       var ln = parseInt(sel.id.replace('lpSel_',''));
       if (!runningLines[ln]) {
-        sel.style.display = '';
-        sel.value = '0';  // 重置选择
+        // 恢复所有输入框、移除静态文本
+        var restoreIds = ['lpSel_'+ln, 'lpQty_'+ln, 'lpPrice_'+ln, 'lpDisc_'+ln, 'lpCust_'+ln];
+        for (var ri = 0; ri < restoreIds.length; ri++) {
+          var inp2 = document.getElementById(restoreIds[ri]);
+          if (inp2) inp2.style.display = '';
+          var st2 = document.getElementById('lpStatic_'+restoreIds[ri]);
+          if (st2) st2.remove();
+        }
+        if (sel) sel.value = '0';  // 重置选择
         // 清除数据库中的产品配置
         fetch('/api/industry/line-config/save?warehouse_id='+wid+'&line_number='+ln+'&product_type_id=0&price_mode=sell&price_discount=1.0&custom_price=0', { method: 'POST', headers: {'Authorization': 'Bearer '+tk} });
         var nameSpan = document.getElementById('lpName_'+ln);
@@ -591,56 +640,119 @@ function loadRunningCountdowns(wid) {
         el.innerHTML = '<div style="font-size:12px;color:#3fb950;margin-top:2px">✅ 生产中</div>'+
           '<div id="cd_'+ln+'_'+wid+'" style="font-size:14px;color:#58a6ff;font-weight:bold">计算中...</div>';
         // 隐藏下拉菜单，改为文本显示
-        var sel = document.getElementById('lpSel_'+ln);
-        if (sel) {
-          sel.style.display = 'none';
-          var nameSpan = document.createElement('span');
-          nameSpan.id = 'lpName_'+ln;
-          nameSpan.style.cssText = 'font-size:12px;color:#c9d1d9;font-weight:bold;margin-left:4px';
-          nameSpan.textContent = j.product_name || '#'+j.product_type_id;  // 用任务数据的产品名，不依赖下拉框
-          sel.parentNode.insertBefore(nameSpan, sel.nextSibling);
+        hideLineInputs(ln, wid, j.product_name || '#'+j.product_type_id);
+      }
+      // 设置 data-end 供全局倒计时使用
+      var cdEl = document.getElementById('cd_'+ln+'_'+wid);
+      if (cdEl) cdEl.setAttribute('data-end', endDate.toISOString());
+      // 检查是否已完成
+      if (new Date() >= endDate) {
+        if (!cdEl.getAttribute('data-completed')) {
+          cdEl.setAttribute('data-completed', '1');
+          fetch('/api/industry/mark-completed/'+j.id, { method: 'POST', headers: {'Authorization': 'Bearer '+tk} });
+        }
+        cdEl.textContent = '⏰ 已完成';
+        if (!cdEl.getAttribute('data-btn-added')) {
+          cdEl.setAttribute('data-btn-added', '1');
+          cdEl.innerHTML = cdEl.textContent + ' <span style="font-size:12px;color:#3fb950;cursor:pointer;margin-left:8px" onclick="collectAndReset('+j.id+','+wid+','+ln+')">📦 交付</span>';
         }
       }
-      setInterval(function(){
-        var cd = document.getElementById('cd_'+ln+'_'+wid);
-        if (!cd) return;
-        var now = new Date();
-        var diff = endDate - now;
-        if (diff <= 0) { cd.textContent = '⏰ 已完成'; return; }
-        var h = Math.floor(diff / 3600000);
-        var m = Math.floor((diff % 3600000) / 60000);
-        var s = Math.floor((diff % 60000) / 1000);
-        cd.textContent = '⏱ ' + h + 'h ' + m + 'm ' + s + 's';
-      }, 1000);
-      var intId = setInterval(function(){
-        var cd = document.getElementById('cd_'+ln+'_'+wid);
-        if (!cd) return;
-        var now = new Date();
-        var diff = endDate - now;
-        if (diff <= 0) { cd.textContent = '⏰ 已完成'; return; }
-        var h = Math.floor(diff / 3600000);
-        var m = Math.floor((diff % 3600000) / 60000);
-        var s = Math.floor((diff % 60000) / 1000);
-        cd.textContent = '⏱ ' + h + 'h ' + m + 'm ' + s + 's';
-      }, 1000);
-      window._cdInts[wid+'_'+ln] = intId;
     }
   }).catch(function(){});
 }
 
+function hideLineInputs(lineNum, wid, prodName) {
+  var inputIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum];
+  var labelMap = {'lpQty_':'数量: ','lpPrice_':'售价: ','lpDisc_':'折扣: ','lpCust_':'自定义: '};
+  for (var ii = 0; ii < inputIds.length; ii++) {
+    var inp = document.getElementById(inputIds[ii]);
+    if (!inp) continue;
+    inp.style.display = 'none';
+    if (ii > 0) {
+      var stxt = labelMap[inputIds[ii].replace(/\d+$/,'')] || '';
+      if (inp.tagName === 'SELECT') stxt += inp.options[inp.selectedIndex] ? inp.options[inp.selectedIndex].text : inp.value;
+      else stxt += inp.value;
+      var span = document.createElement('span');
+      span.id = 'lpStatic_'+inputIds[ii];
+      span.style.cssText = 'font-size:12px;color:#8b949e;margin-left:4px';
+      span.textContent = stxt;
+      inp.parentNode.insertBefore(span, inp.nextSibling);
+    }
+  }
+  // 产品名
+  var sel = document.getElementById('lpSel_'+lineNum);
+  if (sel) {
+    var nameSpan = document.createElement('span');
+    nameSpan.id = 'lpName_'+lineNum;
+    nameSpan.style.cssText = 'font-size:12px;color:#c9d1d9;font-weight:bold;margin-left:4px';
+    nameSpan.textContent = prodName;
+    sel.parentNode.insertBefore(nameSpan, sel.nextSibling);
+  }
+}
+
+function collectAndReset(jobId, wid, lineNum) {
+  if (!confirm('确认交付？')) return;
+  var tk = window.authToken || localStorage.getItem('auth_token');
+  fetch('/api/industry/collect?job_id='+jobId, { method: 'POST', headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
+    if (d.ok) {
+      // 重置生产线：恢复所有输入框、移除静态文本
+      var restoreIds = ['lpSel_'+lineNum, 'lpQty_'+lineNum, 'lpPrice_'+lineNum, 'lpDisc_'+lineNum, 'lpCust_'+lineNum];
+      for (var ri = 0; ri < restoreIds.length; ri++) {
+        var inp = document.getElementById(restoreIds[ri]);
+        if (inp) inp.style.display = '';
+        var st = document.getElementById('lpStatic_'+restoreIds[ri]);
+        if (st) st.remove();
+      }
+      var nameSpan = document.getElementById('lpName_'+lineNum);
+      if (nameSpan) nameSpan.remove();
+      // 重置产品下拉
+      var sel = document.getElementById('lpSel_'+lineNum);
+      if (sel) sel.value = '0';
+      var el = document.getElementById('lineProfit_'+(lineNum-1));
+      if (el) el.innerHTML = '<span style="color:#8b949e">— 选择产品后将显示成本与利润</span>';
+      // 移除倒计时元素
+      var cd = document.getElementById('cd_'+lineNum+'_'+wid);
+      if (cd) cd.remove();
+      // 清除数据库中的产品配置
+      fetch('/api/industry/line-config/save?warehouse_id='+wid+'&line_number='+lineNum+'&product_type_id=0&price_mode=sell&price_discount=1.0&custom_price=0', { method: 'POST', headers: {'Authorization': 'Bearer '+tk} });
+      loadShortageSummary(wid);
+    } else {
+      alert(d.message || '交付失败');
+    }
+  });
+}
+
 // ========== 生产任务 Tab ==========
 
+var _prodMonth = '';
+
 function renderProductionTab(wid, jobs) {
-  var h = '<h4 style="margin-bottom:8px">生产任务</h4>';
-  if (jobs.length === 0) {
-    h += '<div class="no-result">暂无生产任务</div>';
+  // 按月筛选
+  if (!_prodMonth) {
+    var now = new Date();
+    _prodMonth = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  }
+  var filtered = jobs.filter(function(j){ return j.started_at && j.started_at.indexOf(_prodMonth) === 0; });
+  // 生成月份选项
+  var months = {};
+  for (var i = 0; i < jobs.length; i++) {
+    if (jobs[i].started_at) months[jobs[i].started_at.substring(0,7)] = true;
+  }
+  var monthOpts = Object.keys(months).sort().reverse();
+  if (monthOpts.indexOf(_prodMonth) === -1 && monthOpts.length > 0) _prodMonth = monthOpts[0];
+  var h = '<h4 style="margin-bottom:8px">生产历史</h4>'+
+    '<div style="margin-bottom:8px;font-size:12px;color:#8b949e">月份: <select id="prodMonthSel" style="padding:2px 6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px" onchange="_prodMonth=this.value;switchWHTab({target:document.querySelectorAll(\'#pageIndustry .profit-tab\')[2]},\'production\','+wid+')">'+
+    monthOpts.map(function(m){ return '<option value="'+m+'"'+(m===_prodMonth?' selected':'')+'>'+m+'</option>'; }).join('')+
+    '</select> 共 '+(filtered.length)+' 条</div>';
+  if (filtered.length === 0) {
+    h += '<div class="no-result">该月暂无生产任务</div>';
     return h;
   }
-  for (var i = 0; i < jobs.length; i++) {
-    var j = jobs[i];
-    var statusMap = {'running':'运行中','completed':'待收付','collected':'已收付','cancelled':'已取消'};
+  for (var i = 0; i < filtered.length; i++) {
+    var j = filtered[i];
+    var statusMap = {'running':'运行中','completed':'已完成','collected':'已收付','cancelled':'已取消'};
     var statusText = statusMap[j.status] || j.status;
-    var statusColor = j.status==='running'?'#58a6ff':(j.status==='completed'?'#3fb950':(j.status==='cancelled'?'#8b949e':'#da3633'));
+    var statusColor = j.status==='running'?'#58a6ff':(j.status==='completed'||j.status==='collected'?'#3fb950':(j.status==='cancelled'?'#8b949e':'#da3633'));
     var snap = {};
     try { snap = JSON.parse(j.config_snapshot || '{}'); } catch(e) {}
     var cost = snap.cost_snapshot || {};
@@ -661,8 +773,11 @@ function renderProductionTab(wid, jobs) {
       h += '<div style="margin-top:6px"><button class="watch-btn-sm" onclick="collectJob('+j.id+')">收付</button></div>';
     }
     if (j.status === 'running') {
+      // 去掉秒数，避免格式错误
+      var endVal = j.estimated_end_at.replace(' ','T');
+      if (endVal.length > 16) endVal = endVal.substring(0, 16);
       h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;font-size:12px">'+
-        '<input id="adjTime_'+j.id+'" type="datetime-local" value="'+j.estimated_end_at.replace(' ','T')+'" style="padding:4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
+        '<input id="adjTime_'+j.id+'" type="datetime-local" value="'+endVal+'" style="padding:4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:12px">'+
         ' <span style="color:#8b949e;cursor:pointer" onclick="adjustTime('+j.id+')">调整</span>'+
         ' <span style="color:#da3633;cursor:pointer" onclick="cancelJob('+j.id+')">取消</span></div>';
     }
@@ -817,29 +932,40 @@ function showClearInventory(wid) {
 
 // ---- 生产线 ----
 function populateLineSelects(wid, configs) {
-  /* 填充所有产品下拉框（从关注列表），不清除已有选择 */
+  /* 填充所有产品下拉框（从关注列表），只显示可制造物品 */
   var tk = window.authToken || localStorage.getItem('auth_token');
   fetch('/api/watchlist', { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     var items = d.items || [];
+    if (items.length === 0) { clearSelects(); return; }
+    // 批量检查哪些可制造
+    var ids = items.map(function(x){return x.type_id;}).join(',');
+    fetch('/api/industry/check-manufacturable?type_ids='+ids, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r2){return r2.json()}).then(function(d2){
+      var manu = d2.result || {};
+      var filtered = items.filter(function(x){ return manu[String(x.type_id)] === true; });
+      populateSelectsFromList(filtered);
+    }).catch(function(){ populateSelectsFromList(items); });
+  });
+  function populateSelectsFromList(list) {
     var selects = document.querySelectorAll('[id^="lpSel_"]');
     for (var i = 0; i < selects.length; i++) {
       var sel = selects[i];
-      var curVal = sel.value;  // 保存当前选择
+      var curVal = sel.value;
       sel.innerHTML = '<option value="0">— 未选择 —</option>';
-      for (var j = 0; j < items.length; j++) {
+      for (var j = 0; j < list.length; j++) {
         var opt = document.createElement('option');
-        opt.value = items[j].type_id;
-        opt.textContent = items[j].name_cn || '#'+items[j].type_id;
+        opt.value = list[j].type_id;
+        opt.textContent = list[j].name_cn || '#'+list[j].type_id;
         sel.appendChild(opt);
       }
-      // 恢复当前选择，没有选择则设为未选择
       sel.value = curVal > 0 ? curVal : '0';
     }
-  });
+  }
+  function clearSelects() {
+    document.querySelectorAll('[id^="lpSel_"]').forEach(function(s){ s.innerHTML = '<option value="0">— 未选择 —</option>'; s.value = '0'; });
+  }
 }
 
 function recalcAllLines(wid) {
-  saveLineCoeffs(wid);
   for (var i = 1; i <= 20; i++) {
     var sel = document.getElementById('lpSel_'+i);
     if (sel && parseInt(sel.value) > 0) recalcLine(wid, i);
@@ -911,10 +1037,17 @@ function cancelJob(jobId) {
 function adjustTime(jobId) {
   var val = document.getElementById('adjTime_'+jobId).value;
   if (!val) return;
-  var newEnd = val.replace('T',' ')+':00';
+  // 验证不能早于当前时间
+  var selDate = new Date(val);
+  if (isNaN(selDate.getTime())) { alert('时间格式无效'); return; }
+  var now = new Date();
+  if (selDate <= now) { alert('终点时间不能早于当前时间'); return; }
+  // 格式化为 YYYY-MM-DD HH:MM:00
+  var newEnd = val.replace('T',' ');
+  if (newEnd.length === 16) newEnd += ':00';
   var tk = window.authToken || localStorage.getItem('auth_token');
   fetch('/api/industry/adjust-time?job_id='+jobId+'&new_end='+encodeURIComponent(newEnd), { method: 'POST', headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
-    if (d.ok) alert('已调整');
+    if (d.ok) { alert('已调整'); if (window._currentWH) loadRunningCountdowns(window._currentWH); }
   });
 }
 

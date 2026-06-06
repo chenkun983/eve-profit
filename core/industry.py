@@ -42,6 +42,71 @@ def rebuild_material_cache():
     return count
 
 
+def rebuild_production_cache():
+    """重建可制造物品缓存（制造 activityID=1）和反应缓存（activityID=11）"""
+    from .database import SDEDatabase
+    sde = SDEDatabase()
+    conn = _connect()
+    conn.execute("DELETE FROM manufacturable_cache")
+    conn.execute("DELETE FROM reaction_cache")
+    sde_conn = sde._connect()
+    # 制造
+    prod_rows = sde_conn.execute(
+        "SELECT DISTINCT iap.productTypeID, tz.text as name_cn, it.typeName as name_en "
+        "FROM industryActivityProducts iap "
+        "JOIN invTypes it ON iap.productTypeID = it.typeID "
+        "LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=iap.productTypeID AND tz.languageID='zh' "
+        "WHERE iap.activityID=1 AND it.published=1"
+    ).fetchall()
+    for row in prod_rows:
+        conn.execute("INSERT OR IGNORE INTO manufacturable_cache (type_id, name_cn, name_en) VALUES (?, ?, ?)",
+                     (row['productTypeID'], row['name_cn'] or row['name_en'], row['name_en']))
+    # 反应
+    react_rows = sde_conn.execute(
+        "SELECT DISTINCT iap.productTypeID, tz.text as name_cn, it.typeName as name_en "
+        "FROM industryActivityProducts iap "
+        "JOIN invTypes it ON iap.productTypeID = it.typeID "
+        "LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=iap.productTypeID AND tz.languageID='zh' "
+        "WHERE iap.activityID=11 AND it.published=1"
+    ).fetchall()
+    sde_conn.close()
+    for row in react_rows:
+        conn.execute("INSERT OR IGNORE INTO reaction_cache (type_id, name_cn, name_en) VALUES (?, ?, ?)",
+                     (row['productTypeID'], row['name_cn'] or row['name_en'], row['name_en']))
+    conn.commit()
+    conn.close()
+    return len(prod_rows), len(react_rows)
+
+
+def is_manufacturable(type_id: int) -> bool:
+    conn = _connect()
+    row = conn.execute("SELECT 1 FROM manufacturable_cache WHERE type_id=?", (type_id,)).fetchone()
+    conn.close()
+    return row is not None
+
+
+def search_manufacturable(keyword: str, limit: int = 20) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT type_id, name_cn, name_en FROM manufacturable_cache "
+        "WHERE name_cn LIKE ? OR name_en LIKE ? LIMIT ?",
+        (f'%{keyword}%', f'%{keyword}%', limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def search_reactions(keyword: str, limit: int = 20) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT type_id, name_cn, name_en FROM reaction_cache "
+        "WHERE name_cn LIKE ? OR name_en LIKE ? LIMIT ?",
+        (f'%{keyword}%', f'%{keyword}%', limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def search_materials(keyword: str, limit: int = 20) -> list:
     """搜索原料总表（自动补全）"""
     conn = _connect()
@@ -164,6 +229,55 @@ def get_line_configs(warehouse_id: int) -> list:
         else:
             r['product_name'] = ''
     return result
+
+
+def get_reaction_configs(warehouse_id: int) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT line_number, product_type_id FROM reaction_configs WHERE warehouse_id=? ORDER BY line_number",
+        (warehouse_id,)).fetchall()
+    conn.close()
+    result = [dict(r) for r in rows]
+    from .database import SDEDatabase
+    sde = SDEDatabase()
+    for r in result:
+        if r['product_type_id'] and r['product_type_id'] > 0:
+            r['product_name'] = sde.get_chinese_name(r['product_type_id'])
+        else:
+            r['product_name'] = ''
+    return result
+
+
+def save_reaction_config(warehouse_id: int, line_number: int, product_type_id: int,
+                         price_mode: str = 'sell', price_discount: float = 1.0, custom_price: float = 0) -> bool:
+    conn = _connect()
+    conn.execute(
+        "UPDATE reaction_configs SET product_type_id=?, price_mode=?, price_discount=?, custom_price=?, updated_at=datetime('now') "
+        "WHERE warehouse_id=? AND line_number=?",
+        (product_type_id, price_mode, price_discount, custom_price, warehouse_id, line_number))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def set_reaction_count(warehouse_id: int, user_id: int, count: int) -> tuple:
+    if count < 1 or count > 20:
+        return False, "反应线数量须在 1-20 之间"
+    conn = _connect()
+    w = conn.execute("SELECT id FROM sub_warehouses WHERE id=? AND user_id=?", (warehouse_id, user_id)).fetchone()
+    if not w:
+        conn.close()
+        return False, "分仓库不存在"
+    existing = conn.execute("SELECT COUNT(*) as cnt FROM reaction_configs WHERE warehouse_id=?", (warehouse_id,)).fetchone()
+    cur = existing['cnt'] if existing else 0
+    if count > cur:
+        for i in range(cur + 1, count + 1):
+            conn.execute("INSERT OR IGNORE INTO reaction_configs (warehouse_id, line_number) VALUES (?, ?)", (warehouse_id, i))
+    elif count < cur:
+        conn.execute("DELETE FROM reaction_configs WHERE warehouse_id=? AND line_number > ?", (warehouse_id, count))
+    conn.commit()
+    conn.close()
+    return True, "已更新"
 
 
 def save_line_config(warehouse_id: int, line_number: int, product_type_id: int,

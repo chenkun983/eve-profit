@@ -164,6 +164,24 @@ def init_db():
     except:
         pass
     try:
+        conn.execute("ALTER TABLE production_jobs ADD COLUMN activity_type TEXT DEFAULT 'manufacturing'")
+    except:
+        pass
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS reaction_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id INTEGER NOT NULL,
+            line_number INTEGER NOT NULL,
+            product_type_id INTEGER DEFAULT 0,
+            price_mode TEXT DEFAULT 'sell',
+            price_discount REAL DEFAULT 1.0,
+            custom_price REAL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(warehouse_id, line_number),
+            FOREIGN KEY(warehouse_id) REFERENCES sub_warehouses(id) ON DELETE CASCADE
+        );
+    """)
+    try:
         conn.execute("ALTER TABLE line_configs ADD COLUMN price_discount REAL DEFAULT 1.0")
     except:
         pass
@@ -173,6 +191,16 @@ def init_db():
         pass
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS material_master (
+            type_id INTEGER PRIMARY KEY,
+            name_cn TEXT NOT NULL DEFAULT '',
+            name_en TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS manufacturable_cache (
+            type_id INTEGER PRIMARY KEY,
+            name_cn TEXT NOT NULL DEFAULT '',
+            name_en TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS reaction_cache (
             type_id INTEGER PRIMARY KEY,
             name_cn TEXT NOT NULL DEFAULT '',
             name_en TEXT NOT NULL DEFAULT ''

@@ -24,33 +24,41 @@ function checkAndStart(wid, lineNum, typeId, qty) {
         var endDate = new Date(endStr.replace(' ','T')+'+08:00');
         el.innerHTML = '<div style="font-size:12px;color:#3fb950;margin-top:2px">✅ 生产中，预计 ' + endStr + '</div>'+
           '<div id="cd_'+lineNum+'_'+wid+'" style="font-size:14px;color:#58a6ff;font-weight:bold">计算倒计时...</div>';
-        // 隐藏下拉菜单，改为文本
-        var sel = document.getElementById('lpSel_'+lineNum);
-        if (sel) {
-          var prodName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '#'+typeId;
-          sel.style.display = 'none';
-          var nameSpan = document.createElement('span');
-          nameSpan.id = 'lpName_'+lineNum;
-          nameSpan.style.cssText = 'font-size:12px;color:#c9d1d9;font-weight:bold;margin-left:4px';
-          nameSpan.textContent = prodName;
-          sel.parentNode.insertBefore(nameSpan, sel.nextSibling);
-        }
+        hideLineInputs(lineNum, wid, '#'+typeId);
         // 更新缺口汇总（已扣除本线的材料）
         loadShortageSummary(wid);
-        setInterval(function(){
-          var cd = document.getElementById('cd_'+lineNum+'_'+wid);
-          if (!cd) return;
-          var now = new Date();
-          var diff = endDate - now;
-          if (diff <= 0) {
-            cd.textContent = '⏰ 已完成，请收付';
-            return;
+        var jobId = d.result ? d.result.job_id : 0;
+        // 设置 data-end 供全局倒计时使用
+        var cdEl = document.getElementById('cd_'+lineNum+'_'+wid);
+        if (cdEl && endStr) {
+          var et = new Date(endStr.replace(' ','T')+'+08:00');
+          cdEl.setAttribute('data-end', et.toISOString());
+        }
+        // 确保全局倒计时已启动
+        if (!window._cdTimer) {
+          window._cdTimer = setInterval(function(){
+            document.querySelectorAll('[id^="cd_"]').forEach(function(el2){
+              var es = el2.getAttribute('data-end');
+              if (!es) return;
+              var ed = new Date(es);
+              if (isNaN(ed)) return;
+              var df = ed - new Date();
+              if (df <= 0) { el2.textContent = '⏰ 已完成'; return; }
+              el2.textContent = '⏱ ' + Math.floor(df/3600000) + 'h ' + Math.floor((df%3600000)/60000) + 'm ' + Math.floor((df%60000)/1000) + 's';
+            });
+          }, 1000);
+        }
+        // 检查是否已完成
+        if (cdEl && cdEl.getAttribute('data-end')) {
+          var endD = new Date(cdEl.getAttribute('data-end'));
+          if (!isNaN(endD) && new Date() >= endD) {
+            cdEl.textContent = '⏰ 已完成';
+            if (!cdEl.getAttribute('data-btn-added')) {
+              cdEl.setAttribute('data-btn-added', '1');
+              cdEl.innerHTML = cdEl.textContent + ' <span style="font-size:12px;color:#3fb950;cursor:pointer" onclick="collectAndReset('+jobId+','+wid+','+lineNum+')">📦 交付</span>';
+            }
           }
-          var h = Math.floor(diff / 3600000);
-          var m = Math.floor((diff % 3600000) / 60000);
-          var s = Math.floor((diff % 60000) / 1000);
-          cd.textContent = '⏱ ' + h + 'h ' + m + 'm ' + s + 's';
-        }, 1000);
+        }
       } else {
         alert('已启动！预计完成: ' + endStr);
       }
