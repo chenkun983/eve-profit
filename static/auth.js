@@ -43,6 +43,8 @@ function updateNavTabs() {
   var showFull = (role === 'manufacturer' || role === 'admin' || role === 'super_admin');
   if (rankingTab) rankingTab.style.display = showFull ? '' : 'none';
   if (indTab) indTab.style.display = (role === 'manufacturer' || role === 'admin' || role === 'super_admin') ? '' : 'none';
+  var ordTab = document.getElementById('tabOrders');
+  if (ordTab) ordTab.style.display = window.authToken ? '' : 'none';
 }
 
 function showLogin() {
@@ -53,8 +55,11 @@ function showLogin() {
     if (m) { m.style.display = m.style.display==='block'?'none':'block'; return; }
     showUserMenu(); return;
   }
-  document.getElementById('loginModal').style.display = 'flex';
-  document.getElementById('loginMsg').textContent = '';
+  var lm = document.getElementById('loginModal');
+  if (!lm) { showRegister(); return; }
+  lm.style.display = 'flex';
+  var lmMsg = document.getElementById('loginMsg');
+  if (lmMsg) lmMsg.textContent = '';
 }
 
 function hideLogin() { document.getElementById('loginModal').style.display = 'none'; }

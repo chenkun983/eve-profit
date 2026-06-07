@@ -81,6 +81,10 @@ function switchTab(tab) {
   if (pageEst) { pageEst.style.display = 'none'; var er = document.getElementById('estResult'); if (er) er.style.display = 'none'; }
   if (pageInd) pageInd.style.display = 'none';
   if (pageOrd) pageOrd.style.display = 'none';
+  var pageGuide = document.getElementById('pageGuide');
+  var pageDonate = document.getElementById('pageDonate');
+  if (pageGuide) pageGuide.style.display = 'none';
+  if (pageDonate) pageDonate.style.display = 'none';
   if (tab === 'categories') {
     document.querySelector('.nav-tab:nth-child(1)').classList.add('active');
     if (sidebar) sidebar.style.display = 'block';
@@ -95,6 +99,17 @@ function switchTab(tab) {
     var indTab = document.getElementById('tabIndustry');
     if (indTab) indTab.classList.add('active');
     if (pageInd) { pageInd.style.display = 'block'; if (typeof showIndustry === 'function') showIndustry(); }
+  } else if (tab === 'guide') {
+    document.querySelector('.nav-tab:nth-last-child(2)').classList.add('active');
+    if (pageGuide) { pageGuide.style.display = 'block'; showGuide(); }
+  } else if (tab === 'donate') {
+    document.querySelector('.nav-tab:last-child').classList.add('active');
+    if (pageDonate) { pageDonate.style.display = 'block'; showDonate(); }
+  } else if (tab === 'orders') {
+    if(!window.authToken&&!localStorage.getItem('auth_token')){showLogin();return;}
+    var ordTab = document.getElementById('tabOrders');
+    if (ordTab) ordTab.classList.add('active');
+    if (pageOrd) { pageOrd.style.display = 'block'; if (typeof showOrders === 'function') showOrders(); }
   }
 }
 function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('show'); }
@@ -529,4 +544,60 @@ async function loadOverrides() {
       if (priceData.ok) renderResult(priceData, lastCalcData);
     }
   } catch(e) {}
+}
+
+function showGuide(){
+  var el=document.getElementById('pageGuide');
+  if(!el)return;
+  el.innerHTML='<div style="padding:24px;max-width:800px;margin:0 auto">'+
+    '<h2 style="margin-bottom:20px;color:#58a6ff">📖 使用说明</h2>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
+    '<h3 style="color:#c9d1d9;margin-bottom:12px">用户角色说明</h3>'+
+    '<table style="width:100%;font-size:13px;border-collapse:collapse">'+
+    '<thead><tr style="color:#8b949e"><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">角色</th><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">功能范围</th></tr></thead><tbody>'+
+    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#8b949e">👤 游客</td><td style="padding:8px">市场查询、矿物估价</td></tr>'+
+    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#c9d1d9">👥 普通用户</td><td style="padding:8px">游客权限 + 发布/接受出售单、关注物品、利润排行</td></tr>'+
+    '<tr><td style="padding:8px;color:#d29922">🏭 制造商</td><td style="padding:8px">普通用户权限 + 发布采购单、接采购单、工业管理（仓库/产线/反应）、订单系统完整功能</td></tr>'+
+    '</tbody></table></div>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
+    '<h3 style="color:#c9d1d9;margin-bottom:12px">升级为制造商</h3>'+
+    '<p style="font-size:13px;color:#c9d1d9;line-height:1.8">'+
+    '1️⃣ 游戏内向 <strong style="color:#d29922">baby oye</strong> 转账 <strong style="color:#3fb950">10E ISK</strong>（一个月）<br>'+
+    '2️⃣ 在网站右上角点击个人信息 → <strong style="color:#58a6ff">申请升级成为制造商</strong><br>'+
+    '3️⃣ 填写你的游戏角色名并提交申请<br>'+
+    '4️⃣ 站长审核通过后自动升级</p>'+
+    '<p style="font-size:13px;color:#8b949e;margin-top:8px">收款人游戏内截图：</p>'+
+    '<div style="margin-top:8px;text-align:center"><img src="/img/baby" alt="baby oye" style="max-width:200px;border-radius:8px;border:1px solid #30363d"></div>'+
+    '<div style="margin-top:12px;text-align:center"><img src="/img/upgrade-guide" alt="申请制造商示意" style="max-width:100%;border-radius:8px;border:1px solid #30363d"></div></div>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
+    '<h3 style="color:#c9d1d9;margin-bottom:12px">订单系统说明</h3>'+
+    '<p style="font-size:13px;color:#c9d1d9;line-height:1.8">'+
+    '<strong>📋 订单池</strong>：查看所有公开订单，可按类型（采购/出售）和物品名筛选<br>'+
+    '<strong>✏️ 发布订单</strong>：选择采购单或出售单，填写物品清单和交货信息<br>'+
+    '<strong>📁 我的订单</strong>：查看自己发布的订单及接单情况，可操作交货/确认收货<br>'+
+    '<strong>📦 我的接单</strong>：查看自己接的订单状态，可操作交付/确认收货<br><br>'+
+    '<strong>采购单流程：</strong>制造商接单 → 制造 → 标记交付 → 下单人确认收货（5天自动确认）<br>'+
+    '<strong>出售单流程：</strong>买家接单 → 卖家交货 → 买家确认收货（3天自动确认）</p></div>'+
+    '</div>';
+}
+
+function showDonate(){
+  var el=document.getElementById('pageDonate');
+  if(!el)return;
+  el.innerHTML='<div style="padding:24px;max-width:600px;margin:0 auto;text-align:center">'+
+    '<h2 style="margin-bottom:20px;color:#58a6ff">☕ 投喂站长</h2>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px">'+
+    '<p style="font-size:14px;color:#c9d1d9;margin-bottom:16px">'+
+    '如果这个工具对你有帮助，请站长喝杯奶茶吧 ☕</p>'+
+    '<img src="/img/alipay" alt="支付宝收款码" style="max-width:300px;width:100%;border-radius:8px;border:1px solid #30363d">'+
+    '<p style="font-size:12px;color:#8b949e;margin-top:12px">支付宝扫码投喂</p></div>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px;text-align:left">'+
+    '<h3 style="color:#c9d1d9;margin-bottom:12px">未来计划</h3>'+
+    '<ul style="font-size:13px;color:#c9d1d9;line-height:2;padding-left:20px">'+
+    '<li>目前以服务器 IP 地址作为入口</li>'+
+    '<li>未来视众筹情况将增加域名和硬件升级</li>'+
+    '<li>欢迎在游戏内写信给 <strong style="color:#d29922">baby oye</strong> 反馈 BUG 或建议</li>'+
+    '<li>QQ：<strong style="color:#58a6ff">58309362</strong></li>'+
+    '<li>邮箱：<strong style="color:#58a6ff">58309362@qq.com</strong></li>'+
+    '</ul></div></div>';
 }

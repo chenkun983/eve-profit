@@ -279,6 +279,43 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
     """)
+    # 迁移：users 表加游戏联系人字段
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN game_contact TEXT DEFAULT ''")
+    except:
+        pass
+    # 迁移：订单系统表
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL DEFAULT 'buy',
+            contact_name TEXT DEFAULT '',
+            delivery_location TEXT DEFAULT '游戏内对接',
+            notes TEXT DEFAULT '',
+            pricing_mode TEXT DEFAULT 'sell',
+            discount REAL DEFAULT 1.0,
+            estimated_total REAL DEFAULT 0,
+            items TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'public',
+            created_at TEXT DEFAULT (datetime('now')),
+            deadline TEXT DEFAULT (datetime('now','+14 days')),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS order_acceptances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            accepted_by INTEGER NOT NULL,
+            qty INTEGER NOT NULL DEFAULT 0,
+            expected_days INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(order_id) REFERENCES orders(id),
+            FOREIGN KEY(accepted_by) REFERENCES users(id)
+        );
+    """)
     # 迁移：将所有 is_admin=1 的用户设为对应角色
     conn.execute("UPDATE users SET role='super_admin' WHERE is_admin=1 AND id=(SELECT MIN(id) FROM users WHERE is_admin=1)")
     conn.execute("UPDATE users SET role='admin' WHERE is_admin=1 AND (role IS NULL OR role='' OR role='user')")

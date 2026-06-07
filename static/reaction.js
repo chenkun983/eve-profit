@@ -42,6 +42,54 @@ function renderReactLinesTab(wid, configs) {
   return h;
 }
 
+function showAcceptanceModal(accId, orderId, itemIdx, qty, orderType, status, isSeller) {
+  var old=document.querySelector('.order-modal');if(old)old.remove();
+  var m=document.createElement('div');m.className='order-modal';m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:400;display:flex;align-items:center;justify-content:center';
+  var c=document.createElement('div');c.style.cssText='background:#161b22;border:1px solid #30363d;border-radius:12px;width:400px;max-width:95vw;padding:20px';
+  var isSell=orderType==='sell';
+  var sm={'pending':isSell?'待交货':'待确认','delivering':'制作中','delivered':'待确认','completed':'已完成','cancelled':'已取消'};
+  c.innerHTML='<h3 style="margin:0 0 12px;font-size:16px">'+(isSell?'出售':'采购')+'单 #'+orderId+'</h3>'+
+    '<div style="font-size:13px;color:#c9d1d9;margin-bottom:8px">数量: '+qty.toLocaleString()+'</div>'+
+    '<div style="font-size:13px;color:#c9d1d9;margin-bottom:12px">状态: <span style="color:'+(status==='pending'?'#d29922':(status==='delivering'?'#58a6ff':'#3fb950'))+'">'+(sm[status]||status)+'</span></div>';
+  if(isSell){
+    // 出售单逻辑
+    if(status==='pending'){
+      if(isSeller){
+        c.innerHTML+='<div style="font-size:12px;color:#3fb950;margin-bottom:8px">📦 等待你交货给买家</div>'+
+          '<div style="margin-top:8px"><span style="font-size:12px;color:#da3633;cursor:pointer;margin-right:12px" onclick="cancelAcceptance('+accId+');this.closest(\'.order-modal\').remove()">取消接单</span>'+
+          '<span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="sellerDeliver('+accId+','+orderId+');this.closest(\'.order-modal\').remove()">交货</span></div>';
+      }else{
+        c.innerHTML+='<div style="font-size:12px;color:#d29922;margin-bottom:8px">⏳ 等待卖家交货</div>'+
+          '<div style="margin-top:8px"><span style="font-size:12px;color:#da3633;cursor:pointer" onclick="cancelAcceptance('+accId+');this.closest(\'.order-modal\').remove()">取消接单</span></div>';
+      }
+    }else if(status==='delivering'){
+      c.innerHTML+='<div style="font-size:12px;color:#8b949e;margin-bottom:8px">⚡ 旧状态，忽略</div>';
+    }else if(status==='delivered'){
+      if(isSeller){
+        c.innerHTML+='<div style="font-size:12px;color:#3fb950;margin-bottom:8px">✅ 已交货，等待买家确认</div>';
+      }else{
+        c.innerHTML+='<div style="font-size:12px;color:#3fb950;margin-bottom:8px">✅ 卖家已交货，等待你确认收货</div>'+
+          '<div style="margin-top:8px"><span style="font-size:12px;color:#3fb950;cursor:pointer" onclick="acceptDelivered('+accId+');this.closest(\'.order-modal\').remove()">确认收货</span></div>';
+      }
+    }
+  }else{
+    // 采购单逻辑
+    if(status==='pending'){
+      c.innerHTML+='<div style="font-size:12px;color:#d29922;margin-bottom:8px">⏳ 此接单需确认后才能交付</div>'+
+        '<div style="margin-top:8px"><span style="font-size:12px;color:#da3633;cursor:pointer;margin-right:12px" onclick="cancelAcceptance('+accId+');this.closest(\'.order-modal\').remove()">取消接单</span>'+
+        '<span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="selfConfirmAcceptance('+accId+');this.closest(\'.order-modal\').remove()">确认接单（进入交付）</span></div>';
+    }else if(status==='delivering'){
+      c.innerHTML+='<div style="font-size:12px;color:#3fb950;margin-bottom:8px">⚡ 制造中，完成后点击交付</div>'+
+        '<div style="margin-top:8px"><span style="font-size:12px;color:#da3633;cursor:pointer;margin-right:12px" onclick="cancelAcceptance('+accId+');this.closest(\'.order-modal\').remove()">取消接单</span>'+
+        '<span style="font-size:12px;color:#3fb950;cursor:pointer" onclick="markDelivered('+accId+');this.closest(\'.order-modal\').remove()">标记已交付</span></div>';
+    }else if(status==='delivered'){
+      c.innerHTML+='<div style="font-size:12px;color:#58a6ff;margin-bottom:8px">📦 已交付，等待下单人验收</div>';
+    }
+  }
+  c.innerHTML+='<div style="margin-top:12px"><span style="font-size:12px;color:#8b949e;cursor:pointer" onclick="this.parentElement.parentElement.parentElement.remove()">关闭</span></div>';
+  m.appendChild(c);document.body.appendChild(m);
+}
+
 function saveRcCoeffs(wid) {
   var _r = function(id, def) { var e=document.getElementById(id); return e ? (e.value!==''?parseFloat(e.value):def) : def; };
   var coeffs = JSON.stringify({

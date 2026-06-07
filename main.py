@@ -1,7 +1,7 @@
 """EVE 制造利润分析器 - 服务器入口"""
 import os, sys, shutil, bz2, json, subprocess, hmac, hashlib
 from fastapi import FastAPI, Query, Header, HTTPException, Request, Body
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -52,6 +52,34 @@ STATIC_DIR = os.path.join(BASE, 'static')
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+LOGO_PATH = os.path.join(BASE, 'eve_logo.jpg')
+UPGRADE_IMG = os.path.join(BASE, '申请制造商示意.png')
+ALIPAY_IMG = os.path.join(BASE, '支付宝.jpg')
+BABY_IMG = os.path.join(BASE, 'baby_oye.png')
+
+@app.get("/img/upgrade-guide")
+async def serve_upgrade_guide():
+    if os.path.exists(UPGRADE_IMG):
+        return FileResponse(UPGRADE_IMG, media_type='image/png')
+    return HTMLResponse(status_code=404)
+
+@app.get("/img/baby")
+async def serve_baby():
+    if os.path.exists(BABY_IMG):
+        return FileResponse(BABY_IMG, media_type='image/png')
+    return HTMLResponse(status_code=404)
+
+@app.get("/img/alipay")
+async def serve_alipay():
+    if os.path.exists(ALIPAY_IMG):
+        return FileResponse(ALIPAY_IMG, media_type='image/jpeg')
+    return HTMLResponse(status_code=404)
+
+@app.get("/logo")
+async def serve_logo():
+    if os.path.exists(LOGO_PATH):
+        return FileResponse(LOGO_PATH, media_type='image/jpeg')
+    return HTMLResponse(status_code=404)
 
 @app.get("/")
 async def root():
@@ -442,6 +470,99 @@ from core.industry import (rebuild_material_cache, rebuild_production_cache,
     adjust_production_time, get_production_jobs,
     calc_shortage, create_order, get_orders, update_order_status,
     check_completed_jobs, mark_jobs_completed)
+
+# ========== 订单系统 API ==========
+from core.orders import (create_order, get_public_orders, get_user_orders, get_my_acceptances,
+    get_order_detail, accept_order, update_acceptance_status, check_expired_orders,
+    update_game_contact, get_game_contact)
+
+@app.get("/api/orders/public")
+async def api_public_orders():
+    return {"ok": True, "orders": get_public_orders()}
+
+@app.get("/api/orders/mine")
+async def api_my_orders(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "orders": get_user_orders(uid)}
+
+@app.get("/api/orders/my-acceptances")
+async def api_my_acceptances(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "acceptances": get_my_acceptances(uid)}
+
+@app.get("/api/orders/detail")
+async def api_order_detail(order_id: int = Query(...)):
+    order = get_order_detail(order_id)
+    if not order:
+        return {"ok": False, "message": "订单不存在"}
+    return {"ok": True, "order": order}
+
+@app.post("/api/orders/create")
+async def api_create_order(order_type: str = Query('buy'), items: str = Query('[]'),
+                           contact_name: str = Query(''), delivery_location: str = Query('游戏内对接'),
+                           notes: str = Query(''), pricing_mode: str = Query('sell'), discount: float = Query(1.0),
+                           authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    import json
+    try:
+        item_list = json.loads(items)
+    except:
+        return {"ok": False, "message": "物品格式错误"}
+    oid = create_order(uid, order_type, item_list, contact_name, delivery_location, notes, pricing_mode, discount)
+    return {"ok": True, "order_id": oid}
+
+@app.post("/api/orders/accept")
+async def api_accept_order(order_id: int = Query(...), items_accepted: str = Query('[]'),
+                          expected_days: int = Query(0), notes: str = Query(''),
+                          authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    import json
+    try:
+        acc_list = json.loads(items_accepted)
+    except:
+        return {"ok": False, "message": "格式错误"}
+    ok, msg = accept_order(order_id, uid, acc_list, expected_days, notes)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/orders/cancel")
+async def api_cancel_order(order_id: int = Query(...), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    from core.orders import _connect as _oconn
+    conn = _oconn()
+    order = conn.execute("SELECT * FROM orders WHERE id=? AND user_id=?", (order_id, uid)).fetchone()
+    if not order:
+        conn.close()
+        return {"ok": False, "message": "订单不存在"}
+    if order['status'] not in ('public', 'cancelled', 'expired'):
+        conn.close()
+        return {"ok": False, "message": "该订单当前状态不可删除"}
+    conn.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "message": "已删除"}
+
+@app.post("/api/orders/accept-status")
+async def api_accept_status(acc_id: int = Query(...), status: str = Query('cancelled'),
+                           authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    ok, msg = update_acceptance_status(acc_id, uid, status)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/orders/check-expired")
+async def api_check_expired():
+    count = check_expired_orders()
+    return {"ok": True, "expired": count}
+
+@app.get("/api/profile/game-contact")
+async def api_game_contact(authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    return {"ok": True, "contact": get_game_contact(uid)}
+
+@app.post("/api/profile/game-contact")
+async def api_set_game_contact(contact: str = Query(''), authorization: str = Header(None)):
+    uid = _require_user(authorization)
+    update_game_contact(uid, contact)
+    return {"ok": True}
 
 # ========== 工业管理系统 API ==========
 

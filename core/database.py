@@ -67,10 +67,13 @@ class SDEDatabase:
 
     def search_by_name(self, keyword: str, limit: int = 30) -> list:
         conn = self._connect()
+        # 只返回市场上的可出售物品
         rows = conn.execute(
-            "SELECT keyID as typeID, text as name FROM trnTranslations "
-            "WHERE tcID=8 AND languageID='zh' AND text LIKE ? "
-            "ORDER BY keyID LIMIT ?",
+            "SELECT t.keyID as typeID, t.text as name FROM trnTranslations t "
+            "JOIN invTypes it ON t.keyID=it.typeID "
+            "WHERE t.tcID=8 AND t.languageID='zh' AND t.text LIKE ? "
+            "AND it.published=1 "
+            "ORDER BY t.keyID LIMIT ?",
             (f'%{keyword}%', limit)
         ).fetchall()
         return [dict(row) for row in rows]

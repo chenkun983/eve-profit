@@ -9,6 +9,81 @@ function showIndustry() {
   if (!area) return;
   area.innerHTML = '<div class="loading">加载工业管理系统...</div>';
   loadWarehouseList();
+  setTimeout(function(){ loadIndustryOrders(); }, 500);
+}
+
+function loadIndustryOrders() {
+  var tk = window.authToken || localStorage.getItem('auth_token');
+  if (!tk) return;
+  var allCards = [];
+  function renderCards(){
+    if(allCards.length===0)return;
+    var h='<div style="margin-bottom:12px;background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px">'+
+      '<div style="font-size:13px;color:#8b949e;margin-bottom:8px">📦 当前订单</div>'+
+      '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px">';
+    for(var i=0;i<allCards.length;i++){
+      var c=allCards[i];
+      h+=c.html;
+    }
+    h+='</div></div>';
+    var el=document.getElementById('pageIndustry');
+    if(el){
+      var old=el.querySelector('.industry-orders-section');
+      if(old)old.remove();
+      var wrap=document.createElement('div');
+      wrap.className='industry-orders-section';
+      wrap.innerHTML=h;
+      el.insertBefore(wrap,el.firstChild);
+    }
+  }
+  // 1. 拉取我接的采购单
+  fetch('/api/orders/my-acceptances',{headers:{'Authorization':'Bearer '+tk}}).then(function(r){return r.json()}).then(function(d){
+    var accs=(d.acceptances||[]).filter(function(a){return a.status==='pending'||a.status==='delivering'||a.status==='delivered';});
+    for(var i=0;i<accs.length;i++){
+      var a=accs[i];
+      var item=(a.items||[])[a.item_index]||{};
+      allCards.push({
+        id:'acc',
+        accId:a.id,orderId:a.order_id,itemIdx:a.item_index,qty:a.qty,status:a.status,orderType:'buy',
+        itemName:item.name||'#'+item.type_id,
+        contact:a.contact_name||a.order_owner_name||'',
+        html:'<div class="wh-card" onclick="showAcceptanceModal('+a.id+','+a.order_id+','+a.item_index+','+a.qty+',\'buy\',\''+a.status+'\',0)" style="min-width:170px;flex-shrink:0;cursor:pointer;padding:8px">'+
+          '<div style="font-size:10px;color:#3fb950;margin-bottom:2px">【采购】</div>'+
+          '<div style="font-weight:bold;font-size:12px">#'+a.order_id+'</div>'+
+          '<div style="font-size:11px;color:#c9d1d9;margin-top:2px">'+(item.name||'#'+item.type_id)+' x'+a.qty+'</div>'+
+          '<div style="font-size:11px;color:#8b949e;margin-top:2px">'+(a.contact_name||a.order_owner_name||'')+'</div>'+
+          '<div style="font-size:11px;color:'+(a.status==='pending'?'#d29922':(a.status==='delivering'?'#58a6ff':'#3fb950'))+';margin-top:2px">'+
+          ({'pending':'待确认','delivering':'制作中','delivered':'待验收'}[a.status]||a.status)+'</div></div>'
+      });
+    }
+    renderCards();
+  }).catch(function(){});
+  // 2. 拉取我发布的出售单（有活跃接单的）
+  fetch('/api/orders/mine',{headers:{'Authorization':'Bearer '+tk}}).then(function(r){return r.json()}).then(function(d){
+    var orders=(d.orders||[]).filter(function(o){return o.type==='sell';});
+    for(var i=0;i<orders.length;i++){
+      var o=orders[i];var accs=o.acceptances||[];
+      for(var j=0;j<accs.length;j++){
+        var a=accs[j];
+        if(a.status!=='pending'&&a.status!=='delivering'&&a.status!=='delivered')continue;
+        var item=(o.items||[])[a.item_index]||{};
+        allCards.push({
+          id:'sell',
+          accId:a.id,orderId:o.id,itemIdx:a.item_index,qty:a.qty,status:a.status,orderType:'sell',
+          itemName:item.name||'#'+item.type_id,
+          contact:a.acceptor_name||'',
+          html:'<div class="wh-card" onclick="showAcceptanceModal('+a.id+','+o.id+','+a.item_index+','+a.qty+',\'sell\',\''+a.status+'\',1)" style="min-width:170px;flex-shrink:0;cursor:pointer;padding:8px">'+
+            '<div style="font-size:10px;color:#a371f7;margin-bottom:2px">【出售】</div>'+
+            '<div style="font-weight:bold;font-size:12px">#'+o.id+'</div>'+
+            '<div style="font-size:11px;color:#c9d1d9;margin-top:2px">'+(item.name||'#'+item.type_id)+' x'+a.qty+'</div>'+
+            '<div style="font-size:11px;color:#8b949e;margin-top:2px">买方: '+(a.acceptor_name||'')+'</div>'+
+            '<div style="font-size:11px;color:'+(a.status==='pending'?'#d29922':(a.status==='delivering'?'#58a6ff':'#3fb950'))+';margin-top:2px">'+
+            ({'pending':'待交货','delivering':'制作中','delivered':'待确认'}[a.status]||a.status)+'</div></div>'
+        });
+      }
+    }
+    renderCards();
+  }).catch(function(){});
 }
 
 function loadWarehouseList() {
@@ -46,6 +121,7 @@ function loadWarehouseList() {
       '5. 倒计时结束 → "收付"下线、记录制造历史</div>'+
       '</div>';
     area.innerHTML = h;
+    if (typeof loadIndustryOrders === 'function') setTimeout(function(){ loadIndustryOrders(); }, 100);
   }).catch(function(){ area.innerHTML = '<div class="no-result">请求失败</div>'; });
 }
 
@@ -119,6 +195,7 @@ function showWarehouse(wid) {
         recalcAllLines(wid);
         // 加载运行中的生产线倒计时
         loadRunningCountdowns(wid);
+        if(typeof loadIndustryOrders==='function') setTimeout(loadIndustryOrders, 100);
       });
     }, 200);
   });

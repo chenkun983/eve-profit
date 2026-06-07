@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EVE 制造利润分析器</title>
+<title>EVE国服工业订单系统</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="container">
   <header>
     <div class="header-left">
-      <h1>🛸 EVE 制造利润分析器</h1>
+      <h1><img src="/logo" alt="EVE" class="site-logo"> EVE国服工业订单系统</h1>
     </div>
     <div class="header-right">
       <span class="subtitle">SDE: <span id="sdeStatus">检查中...</span></span>
@@ -23,7 +23,9 @@
     <button id="tabRanking" class="nav-tab" onclick="switchTab('ranking')" style="display:none">🏆 利润排行</button>
     <button class="nav-tab" onclick="switchTab('estimate')">⛏ 矿物估价</button>
     <button id="tabIndustry" class="nav-tab" onclick="switchTab('industry')" style="display:none">🏭 工业管理</button>
-    <button id="tabOrders" class="nav-tab disabled" disabled>📋 订单系统</button>
+    <button id="tabOrders" class="nav-tab" onclick="switchTab('orders')">📋 订单系统</button>
+    <button class="nav-tab" onclick="switchTab('guide')">📖 使用说明</button>
+    <button class="nav-tab" onclick="switchTab('donate')">☕ 投喂</button>
   </nav>
 
   <div class="main-layout">
@@ -108,6 +110,8 @@
         </div>
         <div id="estResult" class="result-area" style="display:none"></div>
       </div>
+      <div id="pageGuide" class="content-page" style="display:none"></div>
+      <div id="pageDonate" class="content-page" style="display:none"></div>
     </main>
   </div>
 </div>
@@ -118,6 +122,8 @@
 <script src="/static/_patch.js"></script>
 <script src="/static/_patch2.js"></script>
 <script src="/static/reaction.js"></script>
+<script src="/static/orders.js"></script>
+<script src="/static/_order_helpers.js"></script>
 
 <!-- 登录弹窗 -->
 <div id="loginModal" class="modal" style="display:none">

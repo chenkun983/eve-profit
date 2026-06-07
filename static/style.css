@@ -1,5 +1,11 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, 'Segoe UI', 'PingFang SC', sans-serif; background: #0d1117; color: #c9d1d9; }
+
+/* ===== 自定义滚动条（暗色主题） ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
 a { color: #58a6ff; text-decoration: none; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 16px; }
@@ -7,6 +13,7 @@ a { color: #58a6ff; text-decoration: none; }
 /* ===== Header ===== */
 header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
 .header-left { display: flex; align-items: center; gap: 10px; }
+.site-logo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: inline-block; vertical-align: middle; }
 header h1 { font-size: 22px; color: #58a6ff; }
 .subtitle { font-size: 13px; color: #8b949e; }
 
