@@ -93,7 +93,7 @@ def search_item(name: str):
             return row['typeID']
     # 策略3: 联合搜索（同时匹配 typeName 和翻译表）
     row = conn.execute(
-        "SELECT t.keyID as typeID FROM invTypes t "
+        "SELECT t.typeID FROM invTypes t "
         "LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=t.typeID AND tz.languageID='zh' "
         "WHERE (t.typeName LIKE ? OR tz.text LIKE ?) AND t.published=1 LIMIT 1",
         (f'%{name}%', f'%{name}%')
