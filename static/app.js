@@ -556,8 +556,8 @@ function showGuide(){
     '<table style="width:100%;font-size:13px;border-collapse:collapse">'+
     '<thead><tr style="color:#8b949e"><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">角色</th><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">功能范围</th></tr></thead><tbody>'+
     '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#8b949e">👤 游客</td><td style="padding:8px">市场查询、矿物估价</td></tr>'+
-    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#c9d1d9">👥 普通用户</td><td style="padding:8px">游客权限 + 发布/接受出售单、关注物品、利润排行</td></tr>'+
-    '<tr><td style="padding:8px;color:#d29922">🏭 制造商</td><td style="padding:8px">普通用户权限 + 发布采购单、接采购单、工业管理（仓库/产线/反应）、订单系统完整功能</td></tr>'+
+    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#c9d1d9">👥 普通用户</td><td style="padding:8px">游客权限 + 发布/接受出售单、关注物品</td></tr>'+
+    '<tr><td style="padding:8px;color:#d29922">🏭 制造商</td><td style="padding:8px">普通用户权限 + 利润排行 + 发布采购单、接采购单、工业管理（仓库/产线/反应）、订单系统完整功能</td></tr>'+
     '</tbody></table></div>'+
     '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
     '<h3 style="color:#c9d1d9;margin-bottom:12px">升级为制造商</h3>'+
