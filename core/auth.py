@@ -113,6 +113,8 @@ def init_db():
     conn.commit()
     # 初始化默认设置
     conn.execute("INSERT OR IGNORE INTO admin_settings (setting_key, setting_value) VALUES ('payment_recipient', '未设置')")
+    conn.execute("INSERT OR IGNORE INTO admin_settings (setting_key, setting_value) VALUES ('free_trial_enabled', '0')")
+    conn.execute("INSERT OR IGNORE INTO admin_settings (setting_key, setting_value) VALUES ('free_trial_days', '30')")
     conn.commit()
     # 迁移：兼容旧表（可能缺少某些列）
     try:
@@ -332,14 +334,25 @@ def register(username: str, password: str) -> tuple[bool, str]:
     conn = _connect()
     try:
         h = hashlib.sha256(password.encode()).hexdigest()
-        # 第一个注册的用户自动成为管理员
         exists = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         is_admin = 1 if exists == 0 else 0
         role = 'super_admin' if exists == 0 else 'user'
-        conn.execute("INSERT INTO users (username, password_hash, is_admin, role) VALUES (?, ?, ?, ?)",
-                     (username, h, is_admin, role))
+        # 检查是否开启新用户免费试用制造商
+        free_trial = conn.execute("SELECT setting_value FROM admin_settings WHERE setting_key='free_trial_enabled'").fetchone()
+        trial_days = conn.execute("SELECT setting_value FROM admin_settings WHERE setting_key='free_trial_days'").fetchone()
+        if role == 'user' and free_trial and free_trial['setting_value'] == '1':
+            days = int(trial_days['setting_value']) if trial_days else 30
+            from datetime import datetime, timedelta
+            expires = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+            role = 'manufacturer'
+            conn.execute("INSERT INTO users (username, password_hash, is_admin, role, manufacturer_expires_at) VALUES (?, ?, ?, ?, ?)",
+                         (username, h, is_admin, role, expires))
+            msg = f"注册成功（制造商试用 {days} 天）"
+        else:
+            conn.execute("INSERT INTO users (username, password_hash, is_admin, role) VALUES (?, ?, ?, ?)",
+                         (username, h, is_admin, role))
+            msg = "注册成功" + ("（管理员）" if is_admin else "")
         conn.commit()
-        msg = "注册成功" + ("（管理员）" if is_admin else "")
         return True, msg
     except sqlite3.IntegrityError:
         return False, "用户名已存在"

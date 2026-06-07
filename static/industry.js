@@ -127,7 +127,8 @@ function loadWarehouseList() {
 
 // ========== 分仓库详情 ==========
 
-function showWarehouse(wid) {
+function showWarehouse(wid, activeTab) {
+  activeTab = activeTab || 'lines';
   _currentWH = wid;
   var area = document.getElementById('pageIndustry');
   area.innerHTML = '<div class="loading">加载中...</div>';
@@ -163,16 +164,27 @@ function showWarehouse(wid) {
 
 
     // Tab 切换
+    var _at = activeTab || 'lines';
     h += '<div class="profit-tabs" style="margin-bottom:12px">'+
-      '<button class="profit-tab" onclick="switchWHTab(event,\'inventory\','+wid+')">📦 库存</button>'+
-      '<button class="profit-tab active" onclick="switchWHTab(event,\'lines\','+wid+')">🔧 生产线</button>'+
-      '<button class="profit-tab" onclick="switchWHTab(event,\'reaction\','+wid+')">🧪 反应线</button>'+
-      '<button class="profit-tab" onclick="switchWHTab(event,\'production\','+wid+')">📜 历史</button>'+
+      '<button class="profit-tab' + (_at==='inventory'?' active':'') + '" onclick="switchWHTab(event,\'inventory\','+wid+')">📦 库存</button>'+
+      '<button class="profit-tab' + (_at==='lines'?' active':'') + '" onclick="switchWHTab(event,\'lines\','+wid+')">🔧 生产线</button>'+
+      '<button class="profit-tab' + (_at==='reaction'?' active':'') + '" onclick="switchWHTab(event,\'reaction\','+wid+')">🧪 反应线</button>'+
+      '<button class="profit-tab' + (_at==='production'?' active':'') + '" onclick="switchWHTab(event,\'production\','+wid+')">📜 历史</button>'+
       '</div><div id="whTabContent">';
 
     h += renderLinesTab(wid, configs);
     h += '</div></div>';
     area.innerHTML = h;
+    // 切换到初始标签页
+    if (activeTab && activeTab !== 'lines') {
+      setTimeout(function(){
+        var btns = document.querySelectorAll('#pageIndustry .profit-tab');
+        for (var i = 0; i < btns.length; i++) {
+          var oc = btns[i].getAttribute('onclick');
+          if (oc && oc.indexOf("'"+activeTab+"'") > -1) { btns[i].click(); break; }
+        }
+      }, 100);
+    }
     // 加载生产线缺口、填充下拉
     setTimeout(function(){
       populateLineSelects(wid, configs);
@@ -185,12 +197,13 @@ function showWarehouse(wid) {
       // 加载数据库保存的系数
       fetch('/api/industry/line-coeffs?warehouse_id='+wid, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
         if (d.ok && d.coeffs) {
-          if (d.coeffs.time_skill !== undefined) document.getElementById('timeSkill').value = d.coeffs.time_skill;
-          if (d.coeffs.time_build !== undefined) document.getElementById('timeBuild').value = d.coeffs.time_build;
-          if (d.coeffs.time_rig !== undefined) document.getElementById('timeRig').value = d.coeffs.time_rig;
-          if (d.coeffs.mat_rig !== undefined) document.getElementById('matRig').value = d.coeffs.mat_rig;
-          if (d.coeffs.mat_build !== undefined) document.getElementById('matBuild').value = d.coeffs.mat_build;
-          if (d.coeffs.mat_implant !== undefined) document.getElementById('matImplant').value = d.coeffs.mat_implant;
+          var _sv = function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
+          if (d.coeffs.time_skill !== undefined) _sv('timeSkill', d.coeffs.time_skill);
+          if (d.coeffs.time_build !== undefined) _sv('timeBuild', d.coeffs.time_build);
+          if (d.coeffs.time_rig !== undefined) _sv('timeRig', d.coeffs.time_rig);
+          if (d.coeffs.mat_rig !== undefined) _sv('matRig', d.coeffs.mat_rig);
+          if (d.coeffs.mat_build !== undefined) _sv('matBuild', d.coeffs.mat_build);
+          if (d.coeffs.mat_implant !== undefined) _sv('matImplant', d.coeffs.mat_implant);
         }
         recalcAllLines(wid);
         // 加载运行中的生产线倒计时
@@ -202,6 +215,7 @@ function showWarehouse(wid) {
 }
 
 function switchWHTab(ev, tab, wid) {
+  if (typeof _importing !== 'undefined' && _importing) { alert('正在导入仓库数据，请稍候...'); return; }
   var tabs = document.querySelectorAll('#pageIndustry .profit-tab');
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].classList.remove('active');
@@ -231,13 +245,14 @@ function switchWHTab(ev, tab, wid) {
         // 加载保存的系数
         fetch('/api/industry/line-coeffs?warehouse_id='+wid, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(cd){
           if (cd.ok && cd.coeffs) {
-            if (cd.coeffs.time_skill !== undefined) document.getElementById('timeSkill').value = cd.coeffs.time_skill;
-            if (cd.coeffs.time_build !== undefined) document.getElementById('timeBuild').value = cd.coeffs.time_build;
-            if (cd.coeffs.time_rig !== undefined) document.getElementById('timeRig').value = cd.coeffs.time_rig;
-            if (cd.coeffs.time_implant !== undefined) document.getElementById('timeImplant').value = cd.coeffs.time_implant;
-            if (cd.coeffs.mat_rig !== undefined) document.getElementById('matRig').value = cd.coeffs.mat_rig;
-            if (cd.coeffs.mat_build !== undefined) document.getElementById('matBuild').value = cd.coeffs.mat_build;
-            if (cd.coeffs.mat_implant !== undefined) document.getElementById('matImplant').value = cd.coeffs.mat_implant;
+            var _sv = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+            if (cd.coeffs.time_skill !== undefined) _sv('timeSkill', cd.coeffs.time_skill);
+            if (cd.coeffs.time_build !== undefined) _sv('timeBuild', cd.coeffs.time_build);
+            if (cd.coeffs.time_rig !== undefined) _sv('timeRig', cd.coeffs.time_rig);
+            if (cd.coeffs.time_implant !== undefined) _sv('timeImplant', cd.coeffs.time_implant);
+            if (cd.coeffs.mat_rig !== undefined) _sv('matRig', cd.coeffs.mat_rig);
+            if (cd.coeffs.mat_build !== undefined) _sv('matBuild', cd.coeffs.mat_build);
+            if (cd.coeffs.mat_implant !== undefined) _sv('matImplant', cd.coeffs.mat_implant);
           }
           recalcAllLines(wid);
           loadShortageSummary(wid);
@@ -290,7 +305,7 @@ function renderInventoryTab(wid, inv) {
     '<span style="font-size:12px;color:#8b949e;cursor:pointer" onclick="showManualAdd('+wid+')">✏️ 手动</span>'+
     '<span style="font-size:12px;color:#da3633;cursor:pointer" onclick="showClearInventory('+wid+')">🗑 清空</span>'+
     '</div></div>'+
-    '<div style="margin-bottom:6px"><input id="invSearch_'+wid+'" type="text" placeholder="搜索物品..." style="width:200px;padding:6px 10px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px" oninput="filterInventory('+wid+')"></div>';
+    '<div style="margin-bottom:6px"><input id="invSearch_'+wid+'" type="text" placeholder="搜索物品.." autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" style="width:200px;padding:6px 10px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px" oninput="filterInventory('+wid+')" oncompositionstart="this._composing=true" oncompositionend="this._composing=false;filterInventory('+wid+')"></div>';
   if (inv.length === 0) {
     h += '<div class="no-result">仓库为空</div>';
     return h;
@@ -313,30 +328,38 @@ function filterInventory(wid) {
   }
 }
 
-function doImport(wid) {
+var _importing = false;
+function doImport(wid, mode) {
+  mode = mode || 'append';
   var text = document.getElementById('invPaste_'+wid).value.trim();
   if (!text) { alert('请先粘贴仓库内容'); return; }
-  // 先解析文本看看有没有有效物料
+  if (_importing) { alert('正在导入中，请稍候...'); return; }
+  _importing = true;
   var tk = window.authToken || localStorage.getItem('auth_token');
   var btn = event.target; btn.disabled = true; btn.textContent = '解析中...';
   fetch('/api/industry/import?warehouse_id='+wid+'&mode=append', { method: 'POST', headers: {'Authorization': 'Bearer '+tk, 'Content-Type': 'application/json'}, body: JSON.stringify({text: text}) }).then(function(r){return r.json()}).then(function(d){
-    btn.disabled = false; btn.textContent = '添加进仓库';
     if (d.imported === 0 && d.parsed > 0) {
-      alert('未识别到有效的制造原料。过滤了 '+(d.skipped?d.skipped.length:0)+' 项非原料物品');
+      _importing = false;
+      btn.disabled = false; btn.textContent = '添加进仓库';
+      showWarehouse(wid, 'inventory');
+      return;
+    }
+    if (mode === 'override' && !confirm('确认清空当前仓库所有库存后再导入？')) {
+      _importing = false;
       btn.disabled = false; btn.textContent = '添加进仓库';
       return;
     }
-    if (mode === 'override' && !confirm('确认清空当前仓库所有库存后再导入？')) { btn.disabled = false; btn.textContent = '添加进仓库'; return; }
-    // 正式导入
-    btn.disabled = true; btn.textContent = '导入中...';
+    btn.textContent = '导入中...';
     fetch('/api/industry/import?warehouse_id='+wid+'&mode='+mode, { method: 'POST', headers: {'Authorization': 'Bearer '+tk, 'Content-Type': 'application/json'}, body: JSON.stringify({text: text}) }).then(function(r2){return r2.json()}).then(function(d2){
-      btn.disabled = false;
-      var msg = d2.message || '';
-      if (d2.skipped && d2.skipped.length) msg += '（已过滤非原料 '+d2.skipped.length+' 项）';
-      alert(msg);
-      if (d2.ok) showWarehouse(wid);  // 刷新仓库页面
-    });
-  }).catch(function(){ btn.disabled = false; btn.textContent = '添加进仓库'; });
+      _importing = false;
+      btn.disabled = false; btn.textContent = '添加进仓库';
+      if (d2.ok) {
+        showWarehouse(wid, 'inventory');
+      } else {
+        alert(d2.message || '导入失败');
+      }
+    }).catch(function(){ _importing = false; btn.disabled = false; btn.textContent = '添加进仓库'; });
+  }).catch(function(){ _importing = false; btn.disabled = false; btn.textContent = '添加进仓库'; });
 }
 
 // ========== 生产线 Tab（含缺口统计）==========

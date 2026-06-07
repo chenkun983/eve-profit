@@ -332,7 +332,24 @@ def get_inventory(warehouse_id: int) -> list:
         "LEFT JOIN material_master mm ON wi.type_id=mm.type_id "
         "WHERE wi.warehouse_id=? AND wi.quantity>0 ORDER BY mm.name_cn", (warehouse_id,)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        # 如果 material_master 没有名字，从 SDE 翻译表取
+        if not d.get('name_cn') and not d.get('name_en'):
+            from .database import SDEDatabase
+            sde = SDEDatabase()
+            sde_conn = sde._connect()
+            row = sde_conn.execute(
+                "SELECT tz.text as name_cn, it.typeName as name_en "
+                "FROM invTypes it LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=it.typeID AND tz.languageID='zh' "
+                "WHERE it.typeID=?", (d['type_id'],)).fetchone()
+            if row:
+                d['name_cn'] = row['name_cn'] or row['name_en']
+                d['name_en'] = row['name_en']
+            sde_conn.close()
+        result.append(d)
+    return result
 
 
 def get_all_inventory(user_id: int) -> list:
@@ -365,8 +382,6 @@ def import_inventory(warehouse_id: int, user_id: int, items: list, mode: str = '
     for item in items:
         tid = item['type_id']
         qty = item['quantity']
-        if not is_material(tid):
-            continue
         conn.execute(
             "INSERT INTO warehouse_inventory (warehouse_id, type_id, quantity, updated_at) VALUES (?, ?, ?, datetime('now')) "
             "ON CONFLICT(warehouse_id, type_id) DO UPDATE SET quantity=quantity+?, updated_at=datetime('now')",
@@ -392,8 +407,6 @@ def manual_add_material(warehouse_id: int, user_id: int, type_id: int, quantity:
     """手动添加/修改仓库物料"""
     if quantity < 0:
         return False, "数量不能为负数"
-    if not is_material(type_id):
-        return False, "该物品不在制造原料表中"
     conn = _connect()
     w = conn.execute("SELECT id FROM sub_warehouses WHERE id=? AND user_id=?", (warehouse_id, user_id)).fetchone()
     if not w:

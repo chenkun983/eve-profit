@@ -17,7 +17,7 @@ from core.calculator import ProfitCalculator, ManufacturingConfig
 from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_role, upgrade_manufacturer, check_manufacturer_expiry, submit_application, get_applications, review_application, generate_code, redeem_code, list_codes, log_visit, get_visit_stats, save_setting, load_setting
 from core.ranking import scan_category, scan_watchlist
 
-app = FastAPI(title="EVE 制造利润分析器")
+app = FastAPI(title="EVE 制造利润分析器", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -992,7 +992,7 @@ async def api_import_inventory(warehouse_id: int = Query(...), text: str = Body(
     skipped = []
     for p in parsed:
         tid = search_item(p['name'])
-        if tid and is_material(tid):
+        if tid:
             items.append({'type_id': tid, 'quantity': p['quantity']})
         else:
             skipped.append(p['name'])
@@ -1116,6 +1116,10 @@ async def api_check_completed(authorization: str = Header(None)):
 @app.post("/api/upgrade-manufacturer")
 async def api_upgrade(days: int = Query(30, ge=1, le=365),
                        authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    admin_id = verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None)
+    if not admin_id:
+        raise HTTPException(403, "仅管理员可操作")
     uid = _require_user(authorization)
     ok, msg = upgrade_manufacturer(uid, days)
     return {"ok": ok, "message": msg}
@@ -1306,16 +1310,23 @@ async def api_admin_settings(authorization: str = Header(None)):
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可操作")
     from core.auth import get_admin_setting
-    return {"ok": True, "payment_recipient": get_admin_setting("payment_recipient", "未设置")}
+    return {
+        "ok": True,
+        "payment_recipient": get_admin_setting("payment_recipient", "未设置"),
+        "free_trial_enabled": get_admin_setting("free_trial_enabled", "0"),
+        "free_trial_days": get_admin_setting("free_trial_days", "30")
+    }
 
 
 @app.post("/api/admin/settings")
-async def api_set_admin_settings(payment_recipient: str = Query(""), authorization: str = Header(None)):
+async def api_set_admin_settings(payment_recipient: str = Query(""), free_trial_enabled: str = Query("0"), free_trial_days: str = Query("30"), authorization: str = Header(None)):
     from core.auth import verify_token_admin
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可操作")
     from core.auth import set_admin_setting
     set_admin_setting("payment_recipient", payment_recipient)
+    set_admin_setting("free_trial_enabled", free_trial_enabled)
+    set_admin_setting("free_trial_days", free_trial_days)
     return {"ok": True, "message": "已更新"}
 
 

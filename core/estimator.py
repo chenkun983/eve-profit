@@ -59,18 +59,50 @@ def parse_input_text(text: str) -> list:
 
 
 def search_item(name: str):
-    """搜索物品，返回 typeID"""
+    """搜索物品，返回 typeID（多策略匹配）"""
+    import re
+    # 策略1: 翻译表搜索
     results = db.search_by_name(name, limit=5)
     if results:
         return results[0]['typeID']
-    # 尝试英文搜索
     conn = db._connect()
+    # 策略2: 搜索中文 typeName（晨曦SDE中文名可能直接在这里）
+    names_to_try = [name]
+    # 去掉尾部的 I II III IV V
+    short = re.sub(r'\s+(I|II|III|IV|V)\s*$', '', name)
+    if short != name:
+        names_to_try.append(short)
+    # 去掉引号/特殊字符
+    clean = re.sub(r'[""\'\-]', '', name).strip()
+    if clean != name:
+        names_to_try.append(clean)
+    for n in names_to_try:
+        # 翻译表
+        if n != name:
+            results = db.search_by_name(n, limit=5)
+            if results:
+                conn.close()
+                return results[0]['typeID']
+        # invTypes 中文直接匹配（中文服的 SDE 有时 typeName 就是中文）
+        row = conn.execute(
+            "SELECT typeID FROM invTypes WHERE typeName LIKE ? AND published=1 LIMIT 1",
+            (f'%{n}%',)
+        ).fetchone()
+        if row:
+            conn.close()
+            return row['typeID']
+    # 策略3: 联合搜索（同时匹配 typeName 和翻译表）
     row = conn.execute(
-        "SELECT typeID FROM invTypes WHERE typeName LIKE ? AND published=1 LIMIT 1",
-        (f'%{name}%',)
+        "SELECT t.keyID as typeID FROM invTypes t "
+        "LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=t.typeID AND tz.languageID='zh' "
+        "WHERE (t.typeName LIKE ? OR tz.text LIKE ?) AND t.published=1 LIMIT 1",
+        (f'%{name}%', f'%{name}%')
     ).fetchone()
+    if row:
+        conn.close()
+        return row['typeID']
     conn.close()
-    return row['typeID'] if row else None
+    return None
 
 
 def get_reprocess_materials(type_id: int, item_qty: int, reprocess_rate: float = 0.55):

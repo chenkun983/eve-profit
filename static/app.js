@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 function switchTab(tab) {
+  if (typeof _importing !== 'undefined' && _importing) { alert('正在导入仓库数据，请稍候...'); return; }
   document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
   var sidebar = document.getElementById('sidebar');
   var pageCat = document.getElementById('pageCategories');

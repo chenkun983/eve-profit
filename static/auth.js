@@ -259,7 +259,13 @@ function loadAdminData() {
       el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'+
         '<div><strong>游戏收款人</strong><br><span id="recipientDisplay" style="color:#8b949e;font-size:13px">'+(d.payment_recipient||'未设置')+'</span></div>'+
         '<div><input id="recipientInput" type="text" placeholder="新收款人角色名" value="'+(d.payment_recipient==='未设置'?'':d.payment_recipient)+'" style="padding:6px 10px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;width:180px;font-size:13px"> '+
-        '<button class="watch-btn-sm" onclick="saveRecipient()">保存</button></div></div>';
+        '<button class="watch-btn-sm" onclick="saveRecipient()">保存</button></div></div>'+
+        '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'+
+        '<div><strong>新用户免费试用制造商</strong><br><span style="color:#8b949e;font-size:12px">开启后新注册用户自动获得制造商身份</span></div>'+
+        '<div style="display:flex;gap:8px;align-items:center">'+
+        '试用天数 <input id="trialDaysInput" type="number" value="'+(d.free_trial_days||'30')+'" min="1" max="365" style="width:50px;padding:4px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px">天'+
+        '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input id="trialToggle" type="checkbox" '+(d.free_trial_enabled==='1'?'checked':'')+' style="width:16px;height:16px"> 启用</label>'+
+        '<button class="watch-btn-sm" onclick="saveTrialSettings()">保存</button></div></div>';
     });
     // 原料缓存状态
     var el2 = document.getElementById('sdeCache');
@@ -482,8 +488,24 @@ function filterUsers() {
 function saveRecipient() {
   var v = document.getElementById('recipientInput').value.trim();
   if (!v) { alert('请输入收款人角色名'); return; }
-  fetch('/api/admin/settings?payment_recipient='+encodeURIComponent(v), { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
+  var te = document.getElementById('trialToggle');
+  var td = document.getElementById('trialDaysInput');
+  var enabled = te ? (te.checked ? '1' : '0') : '0';
+  var days = td ? td.value : '30';
+  fetch('/api/admin/settings?payment_recipient='+encodeURIComponent(v)+'&free_trial_enabled='+enabled+'&free_trial_days='+days, { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
     if (d.ok) { document.getElementById('recipientDisplay').textContent = v; alert('已更新'); }
+    else alert('保存失败');
+  }).catch(function(){ alert('网络错误'); });
+}
+
+function saveTrialSettings() {
+  var te = document.getElementById('trialToggle');
+  var td = document.getElementById('trialDaysInput');
+  var v = document.getElementById('recipientInput').value.trim();
+  var enabled = te ? (te.checked ? '1' : '0') : '0';
+  var days = td ? td.value : '30';
+  fetch('/api/admin/settings?free_trial_enabled='+enabled+'&free_trial_days='+days+'&payment_recipient='+encodeURIComponent(v||'未设置'), { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
+    if (d.ok) alert('试用设置已保存');
     else alert('保存失败');
   }).catch(function(){ alert('网络错误'); });
 }
