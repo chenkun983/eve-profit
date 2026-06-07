@@ -557,7 +557,7 @@ function showGuide(){
     '<table style="width:100%;font-size:13px;border-collapse:collapse">'+
     '<thead><tr style="color:#8b949e"><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">角色</th><th style="text-align:left;padding:8px;border-bottom:1px solid #30363d">功能范围</th></tr></thead><tbody>'+
     '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#8b949e">👤 游客</td><td style="padding:8px">市场查询、矿物估价</td></tr>'+
-    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#c9d1d9">👥 普通用户</td><td style="padding:8px">游客权限 + 发布/接受出售单、关注物品</td></tr>'+
+    '<tr style="border-bottom:1px solid #21262d"><td style="padding:8px;color:#c9d1d9">👥 普通用户</td><td style="padding:8px">游客权限 + 发布/接受出售单</td></tr>'+
     '<tr><td style="padding:8px;color:#d29922">🏭 制造商</td><td style="padding:8px">普通用户权限 + 利润排行 + 发布采购单、接采购单、工业管理（仓库/产线/反应）、订单系统完整功能</td></tr>'+
     '</tbody></table></div>'+
     '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
@@ -579,6 +579,20 @@ function showGuide(){
     '<strong>📦 我的接单</strong>：查看自己接的订单状态，可操作交付/确认收货<br><br>'+
     '<strong>采购单流程：</strong>制造商接单 → 制造 → 标记交付 → 下单人确认收货（5天自动确认）<br>'+
     '<strong>出售单流程：</strong>买家接单 → 卖家交货 → 买家确认收货（3天自动确认）</p></div>'+
+    '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">'+
+    '<h3 style="color:#c9d1d9;margin-bottom:12px">工业管理操作说明</h3>'+
+    '<p style="font-size:13px;color:#c9d1d9;line-height:1.8">'+
+    '<strong>📦 仓库管理</strong><br>'+
+    '创建仓库 → 从游戏复制物品清单粘贴导入 → 物品自动入库<br><br>'+
+    '<strong>🔧 生产线</strong><br>'+
+    '先在市场查询中⭐关注你想制造的产品 → 回到生产线下拉菜单即可选择<br>'+
+    '（下拉菜单仅显示关注清单中可制造的物品，没有则显示全部可制造）<br>'+
+    '选择产品 → 设置 ME/TE/系数 → 输入数量 → 启动生产<br>'+
+    '启动后自动扣除仓库物料、开始倒计时 → 倒计时结束点击收付下线<br><br>'+
+    '<strong>🧪 反应线</strong><br>'+
+    '选择反应产物 → 设置系数 → 启动反应 → 流程同生产线<br><br>'+
+    '<strong>📋 订单系统与工业管理的联动</strong><br>'+
+    '接到的采购单会显示在工业管理顶部卡片中 → 点击卡片可交付或取消</p></div>'
     '</div>';
 }
 

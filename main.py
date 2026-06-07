@@ -3,6 +3,7 @@ import os, sys, shutil, bz2, json, subprocess, hmac, hashlib
 from fastapi import FastAPI, Query, Header, HTTPException, Request, Body
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -17,7 +18,23 @@ from core.calculator import ProfitCalculator, ManufacturingConfig
 from core.auth import register, login, verify_token, logout as auth_logout, add_watchlist, remove_watchlist, get_watchlist, save_material_overrides, load_material_overrides, get_profile, update_profile, list_users, set_role, upgrade_manufacturer, check_manufacturer_expiry, submit_application, get_applications, review_application, generate_code, redeem_code, list_codes, log_visit, get_visit_stats, save_setting, load_setting
 from core.ranking import scan_category, scan_watchlist
 
-app = FastAPI(title="EVE 制造利润分析器", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def my_lifespan(app):
+    from core.industry import rebuild_production_cache
+    from core.industry import _connect as ind_conn
+    c = ind_conn()
+    cnt = c.execute("SELECT COUNT(*) FROM manufacturable_cache").fetchone()[0]
+    c.close()
+    if cnt == 0:
+        print("[startup] 重建可制造物品缓存...")
+        try:
+            p, r = rebuild_production_cache()
+            print(f"[startup] 可制造 {p} 项, 反应 {r} 项")
+        except Exception as e:
+            print(f"[startup] 重建缓存失败: {e}")
+    yield
+
+app = FastAPI(title="EVE 制造利润分析器", docs_url=None, redoc_url=None, openapi_url=None, lifespan=my_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -583,6 +600,18 @@ async def api_search_materials(q: str = Query("")):
 @app.get("/api/industry/search-reactions")
 async def api_search_reactions(q: str = Query(""), limit: int = Query(20)):
     return {"ok": True, "materials": search_reactions(q, limit)}
+
+@app.get("/api/industry/manufacturable-all")
+async def api_manufacturable_all():
+    """返回所有可制造物品"""
+    from core.industry import _connect as ic
+    conn = ic()
+    rows = conn.execute(
+        "SELECT type_id, name_cn, name_en FROM manufacturable_cache ORDER BY name_cn"
+    ).fetchall()
+    conn.close()
+    return {"ok": True, "items": [dict(r) for r in rows]}
+
 
 @app.get("/api/industry/check-manufacturable")
 async def api_check_manufacturable(type_ids: str = Query("")):

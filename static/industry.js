@@ -1044,17 +1044,20 @@ function showClearInventory(wid) {
 
 // ---- 生产线 ----
 function populateLineSelects(wid, configs) {
-  /* 填充所有产品下拉框（从关注列表），只显示可制造物品 */
+  /* 填充所有产品下拉框 */
   var tk = window.authToken || localStorage.getItem('auth_token');
   fetch('/api/watchlist', { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
     var items = d.items || [];
-    if (items.length === 0) { clearSelects(); return; }
-    // 批量检查哪些可制造
+    if (items.length === 0) {
+      fetch('/api/industry/manufacturable-all').then(function(r2){return r2.json()}).then(function(d2){
+        populateSelectsFromList(d2.items || []);
+      });
+      return;
+    }
     var ids = items.map(function(x){return x.type_id;}).join(',');
-    fetch('/api/industry/check-manufacturable?type_ids='+ids, { headers: {'Authorization': 'Bearer '+tk} }).then(function(r2){return r2.json()}).then(function(d2){
+    fetch('/api/industry/check-manufacturable?type_ids='+ids).then(function(r2){return r2.json()}).then(function(d2){
       var manu = d2.result || {};
-      var filtered = items.filter(function(x){ return manu[String(x.type_id)] === true; });
-      populateSelectsFromList(filtered);
+      populateSelectsFromList(items.filter(function(x){ return manu[String(x.type_id)] === true; }));
     }).catch(function(){ populateSelectsFromList(items); });
   });
   function populateSelectsFromList(list) {
@@ -1071,9 +1074,6 @@ function populateLineSelects(wid, configs) {
       }
       sel.value = curVal > 0 ? curVal : '0';
     }
-  }
-  function clearSelects() {
-    document.querySelectorAll('[id^="lpSel_"]').forEach(function(s){ s.innerHTML = '<option value="0">— 未选择 —</option>'; s.value = '0'; });
   }
 }
 
