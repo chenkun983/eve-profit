@@ -78,7 +78,7 @@ function addOrdItem(){
   div.style.cssText='display:flex;gap:6px;margin-bottom:4px;flex-wrap:wrap;align-items:center';
   div.innerHTML='<input type="text" class="ordItemSearch" placeholder="搜索物品.." autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px" oninput="searchOrdItem(this,'+idx+')" oncompositionstart="this._composing=true" oncompositionend="this._composing=false">'+
     '<input type="hidden" class="ordItemId" value="0">数量: <input type="number" class="ordItemQty" value="1" min="1" style="width:110px;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px">'+
-    '单价: <input type="text" class="ordItemPrice" value="0" style="width:160px;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px;text-align:right"> ISK<span style="color:#da3633;cursor:pointer;font-size:13px" onclick="this.parentElement.remove()">\u2715</span>';
+    '<input type="text" class="ordItemPrice" value="" placeholder="吉他最低售单价" autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" style="width:150px;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px;text-align:right"> ISK<span style="color:#da3633;cursor:pointer;font-size:13px" onclick="this.parentElement.remove()">\u2715</span>';
   c.appendChild(div);
 }
 function searchOrdItem(input,idx){

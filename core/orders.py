@@ -133,9 +133,8 @@ def accept_order(order_id, user_id, items_accepted, expected_days=0, notes=''):
         return False, "不能接自己的订单"
     # 采购单仅制造商可接
     if order['type'] == 'buy':
-        from auth import get_user_role
-        role = get_user_role(user_id)
-        if role not in ('manufacturer', 'admin', 'super_admin'):
+        row = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row or row['role'] not in ('manufacturer', 'admin', 'super_admin'):
             conn.close()
             return False, "仅制造商可接采购单"
     items = json.loads(order['items'])
