@@ -125,24 +125,30 @@ def get_reprocess_materials(type_id: int, item_qty: int, reprocess_rate: float =
     return result, residue
 
 def get_item_volume(type_id: int) -> float:
-    """获取物品体积（立方米），对压缩矿石做修正 (高密度 = 基础 / 100)"""
+    """获取物品体积（立方米）"""
     conn = db._connect()
-    r = conn.execute("SELECT volume, groupID FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
-    if not r:
-        conn.close()
-        return 0.0
-    vol = r['volume']
-    gid = r['groupID']
-    # 矿石类：SDE 体积为 0 或与基础矿不一致的，视为压缩矿石
-    # 实际体积 = 基础体积 / 100
-    if gid and gid in ORE_GROUP_IDS:
-        base = conn.execute(
-            "SELECT MIN(volume) FROM invTypes WHERE groupID=? AND volume>0 AND published=1",
-            (gid,)).fetchone()
-        if base and base[0] and base[0] > 0:
-            if vol == 0 or abs(vol - base[0]) > 0.001:
-                vol = base[0] / 100.0
+    r = conn.execute("SELECT volume FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
     conn.close()
+    return r['volume'] if r else 0.0
+
+
+def get_corrected_volume(type_id: int, name: str = ''):
+    """获取体积，对压缩矿石做修正（高密度 = 基础 / 100）"""
+    vol = get_item_volume(type_id)
+    if vol > 0:
+        return vol
+    # SDE 体积为 0 且名字带"高密度"，从同组找基础矿体积
+    if '高密度' in name:
+        conn = db._connect()
+        r = conn.execute("SELECT groupID FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
+        if r and r['groupID'] in ORE_GROUP_IDS:
+            base = conn.execute(
+                "SELECT MIN(volume) FROM invTypes WHERE groupID=? AND volume>0 AND published=1",
+                (r['groupID'],)).fetchone()
+            if base and base[0] and base[0] > 0:
+                conn.close()
+                return base[0] / 100.0
+        conn.close()
     return vol
 
 
@@ -161,7 +167,8 @@ ORE_GROUP_IDS = {450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465
                  1136,1137,1138,1139,1140,1141,  # 月矿
                  1855,  # 冰产品（用于制造）
                  1885,  # 气云
-                 2836,  # 压缩矿石 Compressed Ores
+                 1922,1923,1924,1925,1926,1927,1928,  # Rare Moon Asteroids + 变种
+                 2836,  # 压缩矿石
                  2840,2841,2842}  # 压缩冰矿
 
 
@@ -226,6 +233,9 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
         is_ore = estimate_is_ore(tid)
         actual_rate = ore_rate if is_ore else reprocess_rate
         mats, residue = get_reprocess_materials(tid, qty, actual_rate)
+        # 统一计算体积（所有分支都要）
+        item_vol = get_corrected_volume(tid, name)
+        pre_vol = round(item_vol * qty, 2) if item_vol else 0
         if mats:
             for m in mats:
                 all_mineral_ids.add(m['type_id'])
@@ -253,16 +263,14 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                     'total_sell': round(m['quantity'] * mp.get('sell_min', 0), 2),
                 })
 
-            item_volume = get_item_volume(tid)
-            pre_volume = round(item_volume * qty, 2)
             post_volume = round(sum(m['quantity'] * (m.get('volume') or get_item_volume(m['type_id'])) for m in mineral_details), 2)
 
             results.append({
                 'name': name,
                 'name_en': db.get_english_name(tid),
                 'quantity': qty,
-                'volume': item_volume,
-                'pre_volume': pre_volume,
+                'volume': item_vol,
+                'pre_volume': pre_vol,
                 'post_volume': post_volume,
                 'total_product_qty': total_product_qty,
                 'has_reprocess': True,
@@ -276,10 +284,11 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                 'mineral_buy_total': round(sum(m['total_buy'] for m in mineral_details), 2),
             })
         elif tid in BASE_ORE_IDS:
-            # 基础矿物：化矿价值等于自身市场价值
+            # 基础矿物
             results.append({
                 'name': name, 'name_en': db.get_english_name(tid),
-                'quantity': qty, 'has_reprocess': False,
+                'quantity': qty, 'volume': item_vol, 'pre_volume': pre_vol,
+                'has_reprocess': False,
                 'sell_price': sell_min, 'buy_price': buy_max,
                 'direct_sell_total': round(sell_min * qty, 2),
                 'direct_buy_total': round(buy_max * qty, 2),
@@ -292,6 +301,7 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                 'name': name,
                 'name_en': db.get_english_name(tid),
                 'quantity': qty,
+                'volume': item_vol, 'pre_volume': pre_vol,
                 'has_reprocess': False,
                 'residue': residue,
                 'sell_price': sell_min,

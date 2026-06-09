@@ -32,6 +32,12 @@ async def my_lifespan(app):
             print(f"[startup] 可制造 {p} 项, 反应 {r} 项")
         except Exception as e:
             print(f"[startup] 重建缓存失败: {e}")
+    # 预热价格缓存
+    try:
+        from cron_scan import prewarm_prices
+        prewarm_prices()
+    except Exception as e:
+        print(f"[startup] 预热价格失败: {e}")
     yield
 
 app = FastAPI(title="EVE 制造利润分析器", docs_url=None, redoc_url=None, openapi_url=None, lifespan=my_lifespan)

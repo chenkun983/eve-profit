@@ -11,9 +11,21 @@ class MarketAPI:
         self._cache = {}
 
     def get_prices_batch(self, type_ids, system_id=None):
-        """批量查询价格，默认查吉他+皮尔米特，取最低卖价和最高买价"""
+        """批量查询价格，默认查吉他+皮尔米特，取最低卖价和最高买价（缓存 10 分钟）"""
         systems = [system_id] if system_id else DEFAULT_SYSTEMS
-        result = {}
+        cache_key = f"batch_{','.join(str(s) for s in systems)}"
+        now = time.time()
+        # 检查缓存
+        cached = self._cache.get(cache_key)
+        if cached and now - cached['ts'] < 600:
+            hit = {tid: cached['data'].get(tid) for tid in type_ids if tid in cached['data']}
+            miss = [tid for tid in type_ids if tid not in cached['data']]
+            if not miss:
+                return hit
+            type_ids = miss
+            result = cached['data'].copy()
+        else:
+            result = {}
         for sid in systems:
             for i in range(0, len(type_ids), 100):
                 batch = type_ids[i:i+100]
@@ -31,7 +43,6 @@ class MarketAPI:
                             sp,sv,smin,smax = _ext('sell')
                             if tid not in result:
                                 result[tid] = {'buy':0,'sell':0,'buy_volume':0,'sell_volume':0,'buy_max':0,'sell_min':0}
-                            # 合并：取最低卖价、最高买价、累加成交量
                             if sp > 0: result[tid]['sell'] = sp if result[tid]['sell']==0 else min(result[tid]['sell'], sp)
                             if bp > 0: result[tid]['buy'] = bp if result[tid]['buy']==0 else max(result[tid]['buy'], bp)
                             if smin > 0: result[tid]['sell_min'] = smin if result[tid]['sell_min']==0 else min(result[tid]['sell_min'], smin)
@@ -39,6 +50,9 @@ class MarketAPI:
                             result[tid]['sell_volume'] += sv
                             result[tid]['buy_volume'] += bv
                 except: pass
+        self._cache[cache_key] = {'ts': now, 'data': result.copy()}
+        if system_id:
+            return {tid: result.get(tid) for tid in type_ids}
         return result
 
     def get_market_quote(self, type_id, system_id=None):
