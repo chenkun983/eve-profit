@@ -99,16 +99,19 @@
         <div class="config-bar">
           <div class="config-group" style="gap:8px">
             <label>矿石化矿率</label>
-            <input type="number" id="estOreRate" value="82.5" min="57" max="85" step="0.5" style="width:70px;padding:6px 8px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;font-size:14px"> %
+            <input type="number" id="estOreRate" value="82.5" min="57" max="100" step="0.5" style="width:70px;padding:6px 8px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;font-size:14px"> %
             <label style="margin-left:8px">其他化矿率</label>
             <input type="number" id="estRate" value="55" min="55" max="55" step="0.5" disabled style="width:60px;padding:6px 8px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;font-size:14px;opacity:0.7"> %（固定）
-            <button class="btn-primary" onclick="doEstimate()" style="padding:6px 16px">开始估价</button>
+            <span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="saveEstSettings()">💾 保存</span>
+            <button class="btn-primary" onclick="doEstimate()" style="padding:4px 14px;font-size:13px">估价</button>
           </div>
         </div>
-        <div style="margin-bottom:8px">
-          <textarea id="estInput" style="width:100%;height:200px;padding:12px;border:1px solid #30363d;border-radius:8px;background:#161b22;color:#c9d1d9;font-size:14px;resize:vertical" placeholder="从游戏中复制物品清单粘贴到这里&#10;格式: 物品名称 数量&#10;例如:&#10;斜长岩 1000&#10;凡晶石 5030&#10;三钛合金 20000 矿物"></textarea>
+        <div style="display:flex;gap:16px;align-items:flex-start">
+          <div style="flex:382;min-width:0">
+            <textarea id="estInput" style="width:100%;height:300px;padding:12px;border:1px solid #30363d;border-radius:8px;background:#161b22;color:#c9d1d9;font-size:14px;resize:vertical" placeholder="从游戏中复制物品清单粘贴到这里&#10;格式: 物品名称 数量&#10;例如:&#10;斜长岩 1000&#10;凡晶石 5030&#10;三钛合金 20000 矿物"></textarea>
+          </div>
+          <div id="estResult" class="result-area" style="flex:618;min-width:500px"></div>
         </div>
-        <div id="estResult" class="result-area" style="display:none"></div>
       </div>
       <div id="pageGuide" class="content-page" style="display:none"></div>
       <div id="pageDonate" class="content-page" style="display:none"></div>

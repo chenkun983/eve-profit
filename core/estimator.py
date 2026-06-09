@@ -21,15 +21,27 @@ def parse_item_line(line: str) -> list:
     if not line:
         return []
     import re
-    # 按空白分割
+    # 如果有 Tab，优先按 Tab 分割（物品名可能包含空格）
+    if '\t' in line:
+        parts = [p.strip() for p in line.split('\t') if p.strip()]
+        if len(parts) >= 2:
+            # 从后往前找数字：可能格式为 名称\t数量 或 名称\t数量\t类型
+            for idx in range(len(parts)-1, -1, -1):
+                try:
+                    qty = int(float(parts[idx]))
+                    if qty > 0:
+                        name = ' '.join(parts[:idx])
+                        if name:
+                            return [(name, qty)]
+                except:
+                    continue
+    # 没有 Tab，按空白分割
     tokens = re.split(r'[\s\t]+', line)
     if not tokens:
         return []
-    
     result = []
     i = 0
     while i < len(tokens):
-        # 找数字
         qty = None
         for j in range(i, len(tokens)):
             clean = tokens[j].replace(',', '').replace('x','').replace('X','').replace('×','')
@@ -37,7 +49,6 @@ def parse_item_line(line: str) -> list:
                 v = int(float(clean))
                 if v > 0:
                     qty = v
-                    # 从 i 到 j-1 是名称
                     name = ' '.join(tokens[i:j])
                     if name:
                         result.append((name, qty))
@@ -46,7 +57,7 @@ def parse_item_line(line: str) -> list:
             except:
                 continue
         if qty is None:
-            break  # 剩余文本无法解析，跳过
+            break
     return result
 
 
@@ -59,50 +70,32 @@ def parse_input_text(text: str) -> list:
 
 
 def search_item(name: str):
-    """搜索物品，返回 typeID（多策略匹配）"""
+    """搜索物品，返回 typeID — SDE 精确匹配优先，无则 cn_sde 补充"""
     import re
-    # 策略1: 翻译表搜索
-    results = db.search_by_name(name, limit=5)
+    # 策略1: SDE 翻译表精确匹配
+    results = db.search_by_name(name, limit=20)
     if results:
-        return results[0]['typeID']
-    conn = db._connect()
-    # 策略2: 搜索中文 typeName（晨曦SDE中文名可能直接在这里）
-    names_to_try = [name]
-    # 去掉尾部的 I II III IV V
-    short = re.sub(r'\s+(I|II|III|IV|V)\s*$', '', name)
-    if short != name:
-        names_to_try.append(short)
-    # 去掉引号/特殊字符
-    clean = re.sub(r'[""\'\-]', '', name).strip()
-    if clean != name:
-        names_to_try.append(clean)
-    for n in names_to_try:
-        # 翻译表
-        if n != name:
-            results = db.search_by_name(n, limit=5)
-            if results:
-                conn.close()
-                return results[0]['typeID']
-        # invTypes 中文直接匹配（中文服的 SDE 有时 typeName 就是中文）
-        row = conn.execute(
-            "SELECT typeID FROM invTypes WHERE typeName LIKE ? AND published=1 LIMIT 1",
-            (f'%{n}%',)
-        ).fetchone()
-        if row:
-            conn.close()
-            return row['typeID']
-    # 策略3: 联合搜索（同时匹配 typeName 和翻译表）
-    row = conn.execute(
-        "SELECT t.typeID FROM invTypes t "
-        "LEFT JOIN trnTranslations tz ON tz.tcID=8 AND tz.keyID=t.typeID AND tz.languageID='zh' "
-        "WHERE (t.typeName LIKE ? OR tz.text LIKE ?) AND t.published=1 LIMIT 1",
-        (f'%{name}%', f'%{name}%')
-    ).fetchone()
-    if row:
-        conn.close()
-        return row['typeID']
-    conn.close()
+        for r in results:
+            if r['name'].strip() == name.strip():
+                return r['typeID']
+    # 策略2: cn_sde 精确匹配（SDE 没有的国服独占物品）
+    try:
+        from core.cn_sde import get_type_id
+        tid = get_type_id(name)
+        if tid:
+            return tid
+    except:
+        pass
     return None
+
+
+def search_item_cn(name: str):
+    """只在国服补充表中搜索"""
+    try:
+        from core.cn_sde import search_name
+        return search_name(name)
+    except:
+        return []
 
 
 def get_reprocess_materials(type_id: int, item_qty: int, reprocess_rate: float = 0.55):
@@ -122,12 +115,35 @@ def get_reprocess_materials(type_id: int, item_qty: int, reprocess_rate: float =
     result = []
     batches = valid_qty // portion  # 可化矿的批次数
     for row in rows:
-        per_batch = int(row['quantity'] * reprocess_rate)  # 每批产出（向下取整）
-        total = per_batch * batches
+        # 先算总量再取整，避免每批截断累积损失
+        total = int(row['quantity'] * batches * reprocess_rate)
+        if total == 0 and row['quantity'] > 0:
+            total = max(1, round(row['quantity'] * batches * reprocess_rate))
         if total > 0:
             result.append({'type_id': row['materialTypeID'], 'quantity': total})
     residue = item_qty - valid_qty  # 不够一批的矿渣
     return result, residue
+
+def get_item_volume(type_id: int) -> float:
+    """获取物品体积（立方米），对压缩矿石做修正 (高密度 = 基础 / 100)"""
+    conn = db._connect()
+    r = conn.execute("SELECT volume, groupID FROM invTypes WHERE typeID=?", (type_id,)).fetchone()
+    if not r:
+        conn.close()
+        return 0.0
+    vol = r['volume']
+    gid = r['groupID']
+    # 矿石类：SDE 体积为 0 或与基础矿不一致的，视为压缩矿石
+    # 实际体积 = 基础体积 / 100
+    if gid and gid in ORE_GROUP_IDS:
+        base = conn.execute(
+            "SELECT MIN(volume) FROM invTypes WHERE groupID=? AND volume>0 AND published=1",
+            (gid,)).fetchone()
+        if base and base[0] and base[0] > 0:
+            if vol == 0 or abs(vol - base[0]) > 0.001:
+                vol = base[0] / 100.0
+    conn.close()
+    return vol
 
 
 def get_portion_size(type_id: int) -> int:
@@ -144,7 +160,9 @@ ORE_GROUP_IDS = {450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465
                  477,478,  # 冰矿
                  1136,1137,1138,1139,1140,1141,  # 月矿
                  1855,  # 冰产品（用于制造）
-                 1885}  # 气云
+                 1885,  # 气云
+                 2836,  # 压缩矿石 Compressed Ores
+                 2840,2841,2842}  # 压缩冰矿
 
 
 def estimate_is_ore(type_id: int) -> bool:
@@ -177,8 +195,28 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
         if not tid:
             results.append({'name': name, 'quantity': qty, 'error': '未找到'})
             continue
+        # 验证匹配结果
+        sde_cn = db.get_chinese_name(tid) or ''
+        sde_en = db.get_english_name(tid) or ''
+        from_cn = False
+        try:
+            from core.cn_sde import get_type_id
+            if get_type_id(name) == tid:
+                from_cn = True
+        except:
+            pass
+        if not from_cn:
+            if sde_cn and len(name) >= 4:
+                if name.lower() not in sde_cn.lower() and sde_cn.lower() not in name.lower():
+                    results.append({'name': name, 'quantity': qty, 'error': f'未匹配（"{name}"→"{sde_cn}"）'})
+                    continue
+        # 检查 SDE 是否有该 typeID 的基础数据
+        sde_tid_ok = bool(sde_cn or sde_en)
+        if not sde_tid_ok:
+            results.append({'name': name, 'quantity': qty, 'error': f'已匹配 typeID={tid}，但 SDE 中无此物品数据（{sde_cn}/{sde_en}）'})
+            continue
 
-        # 市场价（用 marketstat 批量查价，与商品页面一致）
+        # 市场价
         mp = market.get_prices_batch([tid])
         pd = mp.get(tid, {})
         sell_min = pd.get('sell_min', 0)
@@ -201,21 +239,32 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                     mineral_prices[mid] = {'sell_min': pd.get('sell_min', 0), 'buy_max': pd.get('buy_max', 0)}
 
             mineral_details = []
+            total_product_qty = 0
             for m in mats:
                 mp = mineral_prices.get(m['type_id'], {})
+                total_product_qty += m['quantity']
                 mineral_details.append({
                     'type_id': m['type_id'],
                     'name': db.get_chinese_name(m['type_id']),
                     'name_en': db.get_english_name(m['type_id']),
                     'quantity': m['quantity'],
+                    'volume': get_item_volume(m['type_id']),
                     'total_buy': round(m['quantity'] * mp.get('buy_max', 0), 2),
                     'total_sell': round(m['quantity'] * mp.get('sell_min', 0), 2),
                 })
+
+            item_volume = get_item_volume(tid)
+            pre_volume = round(item_volume * qty, 2)
+            post_volume = round(sum(m['quantity'] * (m.get('volume') or get_item_volume(m['type_id'])) for m in mineral_details), 2)
 
             results.append({
                 'name': name,
                 'name_en': db.get_english_name(tid),
                 'quantity': qty,
+                'volume': item_volume,
+                'pre_volume': pre_volume,
+                'post_volume': post_volume,
+                'total_product_qty': total_product_qty,
                 'has_reprocess': True,
                 'residue': residue,
                 'sell_price': sell_min,
@@ -244,10 +293,13 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                 'name_en': db.get_english_name(tid),
                 'quantity': qty,
                 'has_reprocess': False,
+                'residue': residue,
                 'sell_price': sell_min,
                 'buy_price': buy_max,
                 'direct_sell_total': round(sell_min * qty, 2),
                 'direct_buy_total': round(buy_max * qty, 2),
             })
 
+    # 按化矿前体积从大到小排序
+    results.sort(key=lambda r: r.get('pre_volume', 0), reverse=True)
     return results

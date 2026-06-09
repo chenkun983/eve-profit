@@ -323,6 +323,12 @@ def init_db():
     conn.execute("UPDATE users SET role='admin' WHERE is_admin=1 AND (role IS NULL OR role='' OR role='user')")
     conn.commit()
     conn.close()
+    # 初始化国服补充数据表
+    try:
+        from core.cn_sde import init as cn_init
+        cn_init()
+    except Exception as e:
+        print(f"[init] cn_sde 初始化失败: {e}")
 
 
 def register(username: str, password: str) -> tuple[bool, str]:

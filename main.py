@@ -106,6 +106,18 @@ async def root():
 @app.get("/api/search")
 async def search(q: str = Query(..., min_length=1)):
     items = db.search_by_name(q)
+    # 精确匹配的结果放前面
+    exact = [i for i in items if i['name'].strip() == q.strip()]
+    fuzzy = [i for i in items if i['name'].strip() != q.strip()]
+    items = exact + fuzzy
+    # 补充国服表精确匹配
+    try:
+        from core.cn_sde import get_type_id
+        tid = get_type_id(q)
+        if tid and tid not in {i['typeID'] for i in items}:
+            items.insert(0, {'typeID': tid, 'name': q})
+    except:
+        pass
     return {"items": items}
 
 
@@ -1333,17 +1345,37 @@ async def api_payment_recipient():
     return {"ok": True, "payment_recipient": get_admin_setting("payment_recipient", "未设置")}
 
 
+@app.post("/api/admin/cn-sde-update")
+async def api_cn_sde_update(authorization: str = Header(None)):
+    from core.auth import verify_token_admin
+    if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
+        raise HTTPException(403, "仅管理员可操作")
+    from core.cn_sde import download_and_import
+    try:
+        count = download_and_import()
+        return {"ok": True, "message": f"已导入 {count} 个国服物品"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @app.get("/api/admin/settings")
 async def api_admin_settings(authorization: str = Header(None)):
     from core.auth import verify_token_admin
     if not verify_token_admin(authorization[7:] if authorization and authorization.startswith("Bearer ") else None):
         raise HTTPException(403, "仅管理员可操作")
     from core.auth import get_admin_setting
+    cn_info = {"count": 0, "last_update": None}
+    try:
+        from core.cn_sde import get_stats
+        cn_info = get_stats()
+    except:
+        pass
     return {
         "ok": True,
         "payment_recipient": get_admin_setting("payment_recipient", "未设置"),
         "free_trial_enabled": get_admin_setting("free_trial_enabled", "0"),
-        "free_trial_days": get_admin_setting("free_trial_days", "30")
+        "free_trial_days": get_admin_setting("free_trial_days", "30"),
+        "cn_sde": cn_info
     }
 
 

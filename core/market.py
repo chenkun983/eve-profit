@@ -2,41 +2,56 @@
 import requests, time, xml.etree.ElementTree as ET, concurrent.futures
 
 BASE_URL = "https://www.ceve-market.org/api"
+# 默认查询星系：吉他(30000142) + 皮尔米特(30000144)
+DEFAULT_SYSTEMS = [30000142, 30000144]
 
 class MarketAPI:
     def __init__(self, cache_ttl=300):
         self.cache_ttl = cache_ttl
         self._cache = {}
 
-    def get_prices_batch(self, type_ids, system_id=30000142):
+    def get_prices_batch(self, type_ids, system_id=None):
+        """批量查询价格，默认查吉他+皮尔米特，取最低卖价和最高买价"""
+        systems = [system_id] if system_id else DEFAULT_SYSTEMS
         result = {}
-        for i in range(0, len(type_ids), 100):
-            batch = type_ids[i:i+100]
-            try:
-                resp = requests.get(f"{BASE_URL}/marketstat", params=[('typeid',t) for t in batch]+[('usesystem',system_id)], timeout=30)
-                if resp.status_code == 200:
-                    root = ET.fromstring(resp.text)
-                    for m in root.findall('.//type'):
-                        tid = int(m.attrib['id'])
-                        def _ext(el):
-                            e = m.find(el)
-                            if e is None: return 0,0,0,0
-                            return float(e.find('median').text) if e.find('median') is not None else 0, int(e.find('volume').text) if e.find('volume') is not None else 0, float(e.find('min').text) if e.find('min') is not None else 0, float(e.find('max').text) if e.find('max') is not None else 0
-                        bp,bv,bmin,bmax = _ext('buy')
-                        sp,sv,smin,smax = _ext('sell')
-                        result[tid] = {'buy':bp,'sell':sp,'buy_volume':bv,'sell_volume':sv,'buy_max':bmax,'sell_min':smin}
-            except: pass
+        for sid in systems:
+            for i in range(0, len(type_ids), 100):
+                batch = type_ids[i:i+100]
+                try:
+                    resp = requests.get(f"{BASE_URL}/marketstat", params=[('typeid',t) for t in batch]+[('usesystem',sid)], timeout=30)
+                    if resp.status_code == 200:
+                        root = ET.fromstring(resp.text)
+                        for m in root.findall('.//type'):
+                            tid = int(m.attrib['id'])
+                            def _ext(el):
+                                e = m.find(el)
+                                if e is None: return 0,0,0,0
+                                return float(e.find('median').text) if e.find('median') is not None else 0, int(e.find('volume').text) if e.find('volume') is not None else 0, float(e.find('min').text) if e.find('min') is not None else 0, float(e.find('max').text) if e.find('max') is not None else 0
+                            bp,bv,bmin,bmax = _ext('buy')
+                            sp,sv,smin,smax = _ext('sell')
+                            if tid not in result:
+                                result[tid] = {'buy':0,'sell':0,'buy_volume':0,'sell_volume':0,'buy_max':0,'sell_min':0}
+                            # 合并：取最低卖价、最高买价、累加成交量
+                            if sp > 0: result[tid]['sell'] = sp if result[tid]['sell']==0 else min(result[tid]['sell'], sp)
+                            if bp > 0: result[tid]['buy'] = bp if result[tid]['buy']==0 else max(result[tid]['buy'], bp)
+                            if smin > 0: result[tid]['sell_min'] = smin if result[tid]['sell_min']==0 else min(result[tid]['sell_min'], smin)
+                            if bmax > 0: result[tid]['buy_max'] = bmax if result[tid]['buy_max']==0 else max(result[tid]['buy_max'], bmax)
+                            result[tid]['sell_volume'] += sv
+                            result[tid]['buy_volume'] += bv
+                except: pass
         return result
 
-    def get_market_quote(self, type_id, system_id=30000142):
-        cached = self._cache.get(type_id)
+    def get_market_quote(self, type_id, system_id=None):
+        """查询单一物品行情，默认查吉他+皮尔米特合并"""
+        systems = [system_id] if system_id else DEFAULT_SYSTEMS
+        cache_key = f"{type_id}_{','.join(str(s) for s in systems)}"
+        cached = self._cache.get(cache_key)
         if cached and time.time()-cached['ts']<self.cache_ttl:
             return cached['data']
-        result = {}
         windows = {'24h':24,'3d':72,'7d':168,'30d':720,'90d':2160}
-        def _ql(hours):
+        def _ql_for_system(hours, sid):
             try:
-                resp = requests.get(f"{BASE_URL}/quicklook", params={'typeid':type_id,'usesystem':system_id,'sethours':hours}, timeout=15)
+                resp = requests.get(f"{BASE_URL}/quicklook", params={'typeid':type_id,'usesystem':sid,'sethours':hours}, timeout=15)
                 if resp.status_code!=200: return None
                 root = ET.fromstring(resp.text)
                 ql = root.find('.//quicklook')
@@ -50,7 +65,6 @@ class MarketAPI:
                             p=float(o.find('price').text); v=int(o.find('vol_remain').text)
                             if p>0 and v>0: orders.append({'price':p,'volume':v})
                         except: continue
-                # 取原始买卖单的 min/max (不取极值)
                 all_sell=[]; all_buy=[]
                 cs=ql.find('sell_orders')
                 if cs:
@@ -62,23 +76,37 @@ class MarketAPI:
                     for o in cb.findall('order'):
                         try: all_buy.append(float(o.find('price').text))
                         except: pass
-                if not orders:
-                    return {'avg':0,'volume':0,'sell_min':min(all_sell) if all_sell else 0,'buy_max':max(all_buy) if all_buy else 0}
-                pg={}
-                for o in orders: pg[o['price']]=pg.get(o['price'],0)+o['volume']
-                sp=sorted(pg.keys())
-                trim=2
-                if len(sp)>trim*2: sp=sp[trim:-trim]
-                tv=sum(pg[p] for p in sp)
-                ta=sum(p*pg[p] for p in sp)
-                return {'avg': round(ta/tv,2) if tv>0 else 0,'volume':tv,
-                    'sell_min':min(all_sell) if all_sell else 0,'buy_max':max(all_buy) if all_buy else 0}
+                return {'orders':orders,'all_sell':all_sell,'all_buy':all_buy}
             except: return None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
-            fut={ex.submit(_ql,h):l for l,h in windows.items()}
-            fut[ex.submit(lambda:_ql(8760))]='trimmed'
-            for f in concurrent.futures.as_completed(fut):
-                label=fut[f]; data=f.result()
-                if data and data.get('avg',0)>0: result[label]=data
-        self._cache[type_id]={'ts':time.time(),'data':result}
+        result = {}
+        for h_label, h_val in windows.items():
+            # 查所有星系
+            merged_orders = []
+            all_sell = []
+            all_buy = []
+            for sid in systems:
+                data = _ql_for_system(h_val, sid)
+                if data:
+                    merged_orders.extend(data['orders'])
+                    all_sell.extend(data['all_sell'])
+                    all_buy.extend(data['all_buy'])
+            if not merged_orders:
+                sell_min = min(all_sell) if all_sell else 0
+                buy_max = max(all_buy) if all_buy else 0
+                if sell_min > 0 or buy_max > 0:
+                    result[h_label] = {'avg':0,'volume':0,'sell_min':sell_min,'buy_max':buy_max}
+                continue
+            pg={}
+            for o in merged_orders: pg[o['price']]=pg.get(o['price'],0)+o['volume']
+            sp=sorted(pg.keys())
+            trim=2
+            if len(sp)>trim*2: sp=sp[trim:-trim]
+            tv=sum(pg[p] for p in sp)
+            ta=sum(p*pg[p] for p in sp)
+            result[h_label] = {
+                'avg': round(ta/tv,2) if tv>0 else 0,'volume':tv,
+                'sell_min':min(all_sell) if all_sell else 0,
+                'buy_max':max(all_buy) if all_buy else 0
+            }
+        self._cache[cache_key]={'ts':time.time(),'data':result}
         return result

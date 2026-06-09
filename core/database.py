@@ -956,10 +956,15 @@ class SDEDatabase:
         items = conn.execute("SELECT COUNT(*) FROM invTypes WHERE published=1").fetchone()[0]
         bps = conn.execute("SELECT COUNT(*) FROM industryActivityProducts WHERE activityID=1").fetchone()[0]
         mats = conn.execute("SELECT COUNT(*) FROM industryActivityMaterials WHERE activityID=1").fetchone()[0]
+        try:
+            build = conn.execute("SELECT MAX(buildNumber) FROM versionHistory").fetchone()
+        except:
+            build = None
         conn.close()
         size_mb = os.path.getsize(self.db_path) / 1024 / 1024
         return {
             'size_mb': round(size_mb, 1),
+            'build': build[0] if build else 0,
             'items': items,
             'blueprints': bps,
             'materials': mats,

@@ -68,6 +68,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 function switchTab(tab) {
   if (typeof _importing !== 'undefined' && _importing) { alert('正在导入仓库数据，请稍候...'); return; }
+  if (typeof _estimating !== 'undefined' && _estimating) { alert('正在估价中，请稍候...'); return; }
   document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
   var sidebar = document.getElementById('sidebar');
   var pageCat = document.getElementById('pageCategories');
@@ -95,7 +96,7 @@ function switchTab(tab) {
     if (pageRank) { pageRank.style.display = 'block'; if (typeof showRanking === 'function') showRanking(); }
   } else if (tab === 'estimate') {
     document.querySelector('.nav-tab:nth-child(3)').classList.add('active');
-    if (pageEst) pageEst.style.display = 'block';
+    if (pageEst) { pageEst.style.display = 'block'; showEmptyEstimate(); }
   } else if (tab === 'industry') {
     var indTab = document.getElementById('tabIndustry');
     if (indTab) indTab.classList.add('active');
@@ -250,9 +251,39 @@ function fmt(v) { return v.toLocaleString('zh-CN',{minimumFractionDigits:2,maxim
 function fmtShort(v) { var abs = Math.abs(v); if (abs>=1e8) return (v/1e8).toFixed(2)+'e8'; if (abs>=1e4) return (v/1e4).toFixed(2)+'w'; return v.toFixed(2); }
 function fmtV(v) { return v.toLocaleString('zh-CN'); }
 
+var _estimating = false;
+
+function loadEstSettings() {
+  var tk = window.authToken || localStorage.getItem('auth_token');
+  if (!tk) return;
+  try {
+    fetch('/api/load-setting?key=est_ore_rate&default=82.5', { headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
+      if (d.ok && d.value) document.getElementById('estOreRate').value = d.value;
+    });
+  } catch(e) {}
+}
+
+function saveEstSettings() {
+  var tk = window.authToken || localStorage.getItem('auth_token');
+  if (!tk) { alert('请先登录'); return; }
+  var oreRate = document.getElementById('estOreRate').value;
+  fetch('/api/save-setting?key=est_ore_rate&value='+oreRate, { method: 'POST', headers: {'Authorization': 'Bearer '+tk} }).then(function(r){return r.json()}).then(function(d){
+    if (d.ok) alert('配置已保存');
+  });
+}
+
+function showEmptyEstimate() {
+  var el = document.getElementById('estResult');
+  if (!el) return;
+  el.style.display = 'block';
+  el.innerHTML = '<div style="padding:16px;color:#8b949e;font-size:13px">在左侧粘贴物品清单后点击「开始估价」</div>';
+  loadEstSettings();
+}
+
 function doEstimate() {
+  _estimating = true;
   var text = document.getElementById('estInput').value.trim();
-  if (!text) { alert('请输入物品清单'); return; }
+  if (!text) { _estimating = false; alert('请输入物品清单'); return; }
   var oreRate = parseFloat(document.getElementById('estOreRate').value) / 100 || 0.825;
   var otherRate = 0.55; // 固定
   var area = document.getElementById('estResult');
@@ -264,46 +295,89 @@ function doEstimate() {
     if (!d.ok) { area.innerHTML = '<div class="no-result">'+d.message+'</div>'; return; }
     var h = '<h3 style="margin-bottom:12px">估价结果</h3>';
     // 汇总
-    h += '<div class="quote-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:16px">'+
-      '<div class="quote-card"><div class="qlabel">卖单价（最低卖单）汇总</div><div class="qval positive">'+fmt(d.totals.direct_sell)+'</div></div>'+
-      '<div class="quote-card"><div class="qlabel">收单价（最高收单）汇总</div><div class="qval">'+fmt(d.totals.direct_buy)+'</div></div>'+
-      '<div class="quote-card"><div class="qlabel">化矿卖价汇总</div><div class="qval positive">'+fmt(d.totals.mineral_sell)+'</div></div>'+
-      '<div class="quote-card"><div class="qlabel">化矿买价汇总</div><div class="qval">'+fmt(d.totals.mineral_buy)+'</div></div>'+
-      '</div>';
-    // 逐件明细
-    h += '<div style="overflow-x:auto"><table class="ranking-table" style="table-layout:fixed"><colgroup><col style="width:26%"><col style="width:8%"><col style="width:10%"><col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:12%"><col style="width:12%"></colgroup><thead><tr><th>物品</th><th class="text-right">数量</th><th class="text-right">卖单价</th><th class="text-right">收单价</th><th class="text-right">卖价总额</th><th class="text-right">收价总额</th><th class="text-right">化矿卖价</th><th class="text-right">化矿买价</th></tr></thead><tbody>';
+    // 汇总顶部卡片
+    // 先计算跨所有物品的化矿前/后体积、收集全部矿物
+    var totalPreV = 0, totalPostV = 0, totalResidue = 0;
+    var allMinerals = {};  // type_id -> {name, quantity, sell_total, buy_total}
     for (var i = 0; i < d.results.length; i++) {
       var r = d.results[i];
-      var hasSub = (r.minerals && r.minerals.length);
-      var toggleIcon = hasSub ? '<span class="est-toggle" id="et'+i+'">▶</span>' : '';
-      h += '<tr onclick="toggleEstDetail('+i+')" style="cursor:pointer"><td>'+toggleIcon+' '+(r.error ? r.name+' (未找到)' : r.name)+'</td><td class="text-right">'+r.quantity.toLocaleString()+'</td>'+
-        '<td class="text-right">'+(r.sell_price!=null ? fmt(r.sell_price) : '-')+'</td>'+
-        '<td class="text-right">'+(r.buy_price!=null ? fmt(r.buy_price) : '-')+'</td>'+
-        '<td class="text-right">'+(r.direct_sell_total ? fmt(r.direct_sell_total) : '-')+'</td>'+
-        '<td class="text-right">'+(r.direct_buy_total ? fmt(r.direct_buy_total) : '-')+'</td>'+
-        '<td class="text-right">'+(r.mineral_sell_total ? fmt(r.mineral_sell_total) : '-')+'</td>'+
-        '<td class="text-right">'+(r.mineral_buy_total ? fmt(r.mineral_buy_total) : '-')+'</td></tr>';
-      // 化矿明细（可折叠，用 tr 实现）
-      if (r.minerals && r.minerals.length) {
+      if (r.pre_volume) totalPreV += r.pre_volume;
+      if (r.post_volume) totalPostV += r.post_volume;
+      if (r.residue) totalResidue += r.residue;
+      if (r.minerals) {
         for (var j = 0; j < r.minerals.length; j++) {
-          var mm = r.minerals[j];
-          var up = mm.total_sell / mm.quantity;
-          var bp = mm.total_buy / mm.quantity;
-          h += '<tr class="est-detail" data-idx="'+i+'" style="display:none;opacity:0.7"><td style="padding-left:28px;font-size:12px"><span style="display:inline-block;width:1.2em;text-align:right">↳</span> '+mm.name+'</td><td class="text-right">'+mm.quantity.toLocaleString()+'</td><td class="text-right">'+fmt(up)+'</td><td class="text-right">'+fmt(bp)+'</td><td></td><td></td><td class="text-right">'+fmt(mm.total_sell)+'</td><td class="text-right">'+fmt(mm.total_buy)+'</td></tr>';
+          var m = r.minerals[j];
+          if (!allMinerals[m.type_id]) allMinerals[m.type_id] = {name: m.name, quantity: 0, sell_total: 0, buy_total: 0};
+          allMinerals[m.type_id].quantity += m.quantity;
+          allMinerals[m.type_id].sell_total += m.total_sell;
+          allMinerals[m.type_id].buy_total += m.total_buy;
         }
-        // 矿渣（不够一批的剩余）
-        if (r.residue && r.residue > 0) {
-          h += '<tr class="est-detail" data-idx="'+i+'" style="display:none;opacity:0.5;font-style:italic"><td style="padding-left:28px;font-size:12px"><span style="display:inline-block;width:1.2em;text-align:right">↳</span> 矿渣 '+r.residue.toLocaleString()+' 块</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>';
-        }
-      }
-      if (!r.minerals && !r.error) {
-        h += '<tr class="est-detail" data-idx="'+i+'" style="display:none;opacity:0.5;font-style:italic"><td style="padding-left:28px;font-size:12px"><span style="display:inline-block;width:1.2em;text-align:right">↳</span> 矿渣</td><td></td><td></td><td></td><td class="text-right">'+(r.direct_sell_total?fmt(r.direct_sell_total):'-')+'</td><td class="text-right">'+(r.direct_buy_total?fmt(r.direct_buy_total):'-')+'</td><td></td><td></td></tr>';
       }
     }
-    h += '</tbody></table></div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">'+
+      '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">📦 化矿前</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#c9d1d9">卖: '+fmt(d.totals.direct_sell)+'</div><div style="font-size:13px;color:#c9d1d9">收: '+fmt(d.totals.direct_buy)+'</div></div></div>'+
+      '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">⚗️ 化矿后</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#3fb950">卖: '+fmt(d.totals.mineral_sell)+'</div><div style="font-size:13px;color:#c9d1d9">收: '+fmt(d.totals.mineral_buy)+'</div></div></div>'+
+      '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">📐 体积</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#c9d1d9">前: '+fmtV(totalPreV)+' m³</div><div style="font-size:13px;color:#58a6ff">后: '+fmtV(totalPostV)+' m³</div></div></div>'+
+      '</div>';
+    // 化矿产物汇总列表
+    var mineralKeys = Object.keys(allMinerals);
+    if (mineralKeys.length > 0) {
+      h += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:12px">'+
+        '<h4 style="margin-bottom:8px;font-size:14px;color:#c9d1d9">🏭 化矿产物汇总</h4>'+
+        '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="color:#8b949e"><th style="text-align:left;padding:4px 8px">材料</th><th style="text-align:right;padding:4px 8px">数量</th><th style="text-align:right;padding:4px 8px">卖价</th><th style="text-align:right;padding:4px 8px">买价</th></tr></thead><tbody>';
+      for (var tid in allMinerals) {
+        var mm = allMinerals[tid];
+        h += '<tr><td style="padding:4px 8px">'+mm.name+'</td><td style="text-align:right;padding:4px 8px">'+mm.quantity.toLocaleString()+'</td>'+
+          '<td style="text-align:right;padding:4px 8px">'+fmt(mm.sell_total)+'</td><td style="text-align:right;padding:4px 8px">'+fmt(mm.buy_total)+'</td></tr>';
+      }
+      h += '</tbody></table></div></div>';
+    }
+    // 矿渣清单
+    var slagItems = [];
+    for (var i = 0; i < d.results.length; i++) {
+      var r = d.results[i];
+      if (r.residue && r.residue > 0) {
+        slagItems.push({name: r.name, qty: r.residue});
+      }
+    }
+    if (slagItems.length > 0) {
+      h += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:12px">'+
+        '<h4 style="margin-bottom:8px;font-size:14px;color:#8b949e">🗑 矿渣清单（不够一批的剩余）</h4>'+
+        '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="color:#8b949e"><th style="text-align:left;padding:4px 8px">物品</th><th style="text-align:right;padding:4px 8px">矿渣数量</th></tr></thead><tbody>';
+      for (var si = 0; si < slagItems.length; si++) {
+        h += '<tr><td style="padding:4px 8px">'+slagItems[si].name+'</td><td style="text-align:right;padding:4px 8px;color:#d29922">'+slagItems[si].qty.toLocaleString()+' 块</td></tr>';
+      }
+      h += '</tbody></table></div></div>';
+    }
+    // 未匹配物品清单（error 不为空的）
+    var unmatched = [];
+    for (var i = 0; i < d.results.length; i++) {
+      if (d.results[i].error) unmatched.push(d.results[i]);
+    }
+    if (unmatched.length > 0) {
+      h += '<div style="background:#0d1117;border:1px solid #da3633;border-radius:8px;padding:14px;margin-bottom:12px">'+
+        '<h4 style="margin-bottom:8px;font-size:14px;color:#da3633">⚠️ 未匹配物品（未参与计算）</h4>'+
+        '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:#8b949e"><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #30363d">输入名称</th><th style="text-align:right;padding:4px 8px;border-bottom:1px solid #30363d">数量</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #30363d">原因</th></tr></thead><tbody>';
+      for (var ui = 0; ui < unmatched.length; ui++) {
+        h += '<tr><td style="padding:3px 8px;border-bottom:1px solid #21262d">'+unmatched[ui].name+'</td><td style="text-align:right;padding:3px 8px;border-bottom:1px solid #21262d">'+unmatched[ui].quantity.toLocaleString()+'</td><td style="padding:3px 8px;border-bottom:1px solid #21262d;color:#d29922">'+unmatched[ui].error+'</td></tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    // 物品体积清单（按体积倒序）
+    h += '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:12px">'+
+      '<h4 style="margin-bottom:8px;font-size:14px;color:#8b949e">📦 物品体积清单</h4>'+
+      '<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:#8b949e"><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #30363d">物品</th><th style="text-align:right;padding:4px 8px;border-bottom:1px solid #30363d">数量</th><th style="text-align:right;padding:4px 8px;border-bottom:1px solid #30363d">总体积</th></tr></thead><tbody>';
+    for (var i = 0; i < d.results.length; i++) {
+      var r = d.results[i];
+      if (r.error) continue;
+      var vol = r.pre_volume || (r.volume ? r.volume * r.quantity : 0);
+      h += '<tr><td style="padding:3px 8px;border-bottom:1px solid #21262d">'+(r.name||'?')+'</td><td style="text-align:right;padding:3px 8px;border-bottom:1px solid #21262d">'+r.quantity.toLocaleString()+'</td><td style="text-align:right;padding:3px 8px;border-bottom:1px solid #21262d">'+vol.toFixed(2)+' m³</td></tr>';
+    }
+    h += '</tbody></table></div></div>';
+    _estimating = false;
     area.innerHTML = h;
   })
-  .catch(function(){ area.innerHTML = '<div class="no-result">请求失败</div>'; });
+  .catch(function(){ _estimating = false; area.innerHTML = '<div class="no-result">请求失败</div>'; });
 }
 
 function toggleEstDetail(idx) {

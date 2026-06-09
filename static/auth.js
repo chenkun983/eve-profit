@@ -202,6 +202,7 @@ function loadAdminData() {
       '<div id="visitStats" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">加载访问统计...</div></div>'+
       '<div id="paymentSetting" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">加载设置...</div></div>'+
       '<div id="sdeCache" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">原料缓存...</div></div>'+
+      '<div id="cnSdeInfo" style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px;margin-bottom:16px"><div class="loading">加载国服补充数据...</div></div>'+
       '<h4 style="margin-bottom:8px">会员管理</h4>'+
       '<div style="margin-bottom:10px"><input id="userSearch" type="text" placeholder="搜索用户名..." oninput="filterUsers()" style="padding:8px 12px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#c9d1d9;width:280px;font-size:14px"></div>'+
       '<div style="overflow-x:auto"><table class="ranking-table" id="adminUserTable"><thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>角色</th><th>到期时间</th><th>操作</th><th>注册时间</th></tr></thead><tbody>';
@@ -240,8 +241,18 @@ function loadAdminData() {
       if (!el || !d2.ok) return;
       var c = d2.current || {};
       el.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
-        '<div><strong>SDE 当前版本</strong><br><span style="color:#8b949e;font-size:13px">'+c.size_mb+'MB | '+c.blueprints+' 个蓝图 | '+c.items+' 个物品</span></div>'+
-        '<div><strong>GitHub 最新</strong><br><span style="color:#8b949e;font-size:13px">'+d2.latest_version+'</span></div></div>';
+        '<div><strong>SDE 当前版本</strong><br><span style="color:#8b949e;font-size:13px">'+(c.build||'?')+' | '+c.size_mb+'MB | '+c.blueprints+' 个蓝图 | '+c.items+' 个物品</span></div>'+
+        '<div><strong>GitHub 最新</strong><br><span style="color:#8b949e;font-size:13px">'+d2.latest_version+'</span></div>'+
+        '<div><span style="color:#58a6ff;cursor:pointer" onclick="updateSDE()">⬇️ 更新 SDE</span></div></div>';
+      // 国服补充数据
+      var cnEl = document.getElementById('cnSdeInfo');
+      if (cnEl) {
+        var cn = d2.cn_sde || {};
+        var lastUp = cn.last_update ? cn.last_update.updated_at : '从未';
+        cnEl.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
+          '<div><strong>国服补充数据</strong><br><span style="color:#8b949e;font-size:13px">'+(cn.count||0)+' 个物品 | 上次更新: '+lastUp+'</span></div>'+
+          '<div><span style="color:#58a6ff;cursor:pointer" onclick="updateCnSde()">⬇️ 从 ceve-market 同步</span></div></div>';
+      }
     });
     fetch('/api/admin/visit-stats', { headers: {'Authorization': 'Bearer '+authToken} }).then(function(r){return r.json()}).then(function(d){
       var el = document.getElementById('visitStats');
@@ -432,6 +443,18 @@ async function loadDiscount() {
       if (sel) { sel.value = d.value; loadRanking(); }
     }
   } catch(e) {}
+}
+
+async function updateCnSde() {
+  var el = document.getElementById('cnSdeInfo');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">正在从 ceve-market 同步国服数据...</div>';
+  try {
+    var r = await fetch('/api/admin/cn-sde-update', { method: 'POST', headers: {'Authorization': 'Bearer '+authToken} });
+    var d = await r.json();
+    el.innerHTML = '<p>'+(d.ok?'同步完成: '+d.message:'同步失败: '+d.message)+'</p>';
+    if (d.ok) setTimeout(function(){ location.reload(); }, 1500);
+  } catch(e) { el.innerHTML = '<p>请求失败</p>'; }
 }
 
 async function updateSDE() {
