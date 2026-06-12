@@ -1,31 +1,67 @@
 """CEVE-Market API 市场价格查询"""
-import requests, time, xml.etree.ElementTree as ET, concurrent.futures
+import requests, time, xml.etree.ElementTree as ET, concurrent.futures, os, json, threading
 
 BASE_URL = "https://www.ceve-market.org/api"
 # 默认查询星系：吉他(30000142) + 皮尔米特(30000144)
 DEFAULT_SYSTEMS = [30000142, 30000144]
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'price_cache.json')
+_file_lock = threading.Lock()
 
 class MarketAPI:
-    def __init__(self, cache_ttl=300):
+    def __init__(self, cache_ttl=600):
         self.cache_ttl = cache_ttl
-        self._cache = {}
+        self._mem = {}
+        self._file_loaded = False
+
+    def _load_file(self):
+        if not os.path.exists(CACHE_FILE):
+            self._file_loaded = True
+            return
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self._mem = data.get('prices', {})
+            self._file_loaded = True
+        except:
+            self._file_loaded = True
+
+    def _save_file(self, key, value):
+        with _file_lock:
+            if not os.path.exists(os.path.dirname(CACHE_FILE)):
+                os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+            existing = {}
+            if os.path.exists(CACHE_FILE):
+                try:
+                    with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                        existing = json.load(f)
+                except:
+                    pass
+            if 'prices' not in existing:
+                existing['prices'] = {}
+            existing['prices'][str(key)] = value
+            existing['updated_at'] = time.time()
+            with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(existing, f, ensure_ascii=False)
 
     def get_prices_batch(self, type_ids, system_id=None):
-        """批量查询价格，默认查吉他+皮尔米特，取最低卖价和最高买价（缓存 10 分钟）"""
+        """批量查询价格，默认查吉他+皮尔米特，取最低卖价和最高买价（文件缓存 10 分钟）"""
         systems = [system_id] if system_id else DEFAULT_SYSTEMS
-        cache_key = f"batch_{','.join(str(s) for s in systems)}"
         now = time.time()
-        # 检查缓存
-        cached = self._cache.get(cache_key)
-        if cached and now - cached['ts'] < 600:
-            hit = {tid: cached['data'].get(tid) for tid in type_ids if tid in cached['data']}
-            miss = [tid for tid in type_ids if tid not in cached['data']]
-            if not miss:
-                return hit
-            type_ids = miss
-            result = cached['data'].copy()
-        else:
-            result = {}
+        # 加载文件缓存
+        if not self._file_loaded:
+            self._load_file()
+        # 从文件缓存中取已有的数据
+        result = {}
+        miss = []
+        for tid in type_ids:
+            key = str(tid)
+            if key in self._mem and now - self._mem[key].get('ts', 0) < 600:
+                result[tid] = self._mem[key].get('data', {})
+            else:
+                miss.append(tid)
+        if not miss:
+            return result
+        type_ids = miss
         for sid in systems:
             for i in range(0, len(type_ids), 100):
                 batch = type_ids[i:i+100]
@@ -50,7 +86,9 @@ class MarketAPI:
                             result[tid]['sell_volume'] += sv
                             result[tid]['buy_volume'] += bv
                 except: pass
-        self._cache[cache_key] = {'ts': now, 'data': result.copy()}
+        for tid, r in result.items():
+            self._save_file(tid, {'data': r, 'ts': now})
+            self._mem[str(tid)] = {'data': r, 'ts': now}
         if system_id:
             return {tid: result.get(tid) for tid in type_ids}
         return result
