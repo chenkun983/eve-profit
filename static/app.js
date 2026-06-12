@@ -315,7 +315,7 @@ function doEstimate() {
       }
     }
     h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">'+
-      '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">📦 化矿前</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#c9d1d9">卖: '+fmt(d.totals.direct_sell)+'</div><div style="font-size:13px;color:#c9d1d9">收: '+fmt(d.totals.direct_buy)+'</div></div></div>'+
+      '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">📦 合同估价</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#c9d1d9">卖: '+fmt(d.totals.direct_sell)+'</div><div style="font-size:13px;color:#c9d1d9">收: '+fmt(d.totals.direct_buy)+'</div></div></div>'+
       '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">⚗️ 化矿后</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#3fb950">卖: '+fmt(d.totals.mineral_sell)+'</div><div style="font-size:13px;color:#c9d1d9">收: '+fmt(d.totals.mineral_buy)+'</div></div></div>'+
       '<div class="quote-card" style="padding:10px 12px"><div class="qlabel" style="font-size:11px">📐 体积</div><div style="margin-top:4px;line-height:1.6"><div style="font-size:13px;color:#c9d1d9">前: '+fmtV(totalPreV)+' m³</div><div style="font-size:13px;color:#58a6ff">后: '+fmtV(totalPostV)+' m³</div></div></div>'+
       '</div>';

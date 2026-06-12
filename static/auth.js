@@ -292,7 +292,7 @@ function showRanking() {
   if (!authToken) { showLogin(); return; }
   var area = document.getElementById('pageRanking');
   if (!area) return;
-  area.innerHTML = '<div class="ranking-page"><h3>利润排行</h3><div class="ranking-header"><select id="rankMode" class="rank-select" onchange="onRankModeChange()"><option value="watchlist">我的关注</option><option value="category">按分类扫描</option></select><span id="rankCategoryWrap" style="display:none"><select id="rankCategory" class="rank-select"></select></span><span id="discountWrap" style="display:none;margin-left:8px">批发折扣 <select id="discountSel" class="rank-select" onchange="loadRanking()"><option value="1.0">100%</option><option value="0.95">95%</option><option value="0.9" selected>90%</option><option value="0.85">85%</option><option value="0.8">80%</option></select><button class="save-overrides-btn" onclick="saveDiscount()" style="margin-left:6px">保存</button></span></div><div class="profit-tabs"><button class="profit-tab active" onclick="switchProfitTab(event,\'flip\')">倒卖利润</button><button class="profit-tab" onclick="switchProfitTab(event,\'realistic\')">蓝图零售</button><button class="profit-tab" onclick="switchProfitTab(event,\'ideal\')">基础零售</button><button class="profit-tab" onclick="switchProfitTab(event,\'conservative\')">收单</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bp\')">蓝图批发</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bm\')">基础批发</button></div><div id="rankContent"><div class="loading">加载中...</div></div></div>';
+  area.innerHTML = '<div class="ranking-page"><div style="display:flex;justify-content:space-between;align-items:center"><h3>利润排行</h3><span style="font-size:12px;color:#58a6ff;cursor:pointer" onclick="loadRanking(true)">🔄 刷新缓存</span></div><div class="ranking-header"><select id="rankMode" class="rank-select" onchange="onRankModeChange()"><option value="watchlist">我的关注</option><option value="category">按分类扫描</option></select><span id="rankCategoryWrap" style="display:none"><select id="rankCategory" class="rank-select"></select></span><span id="discountWrap" style="display:none;margin-left:8px">批发折扣 <select id="discountSel" class="rank-select" onchange="loadRanking()"><option value="1.0">100%</option><option value="0.95">95%</option><option value="0.9" selected>90%</option><option value="0.85">85%</option><option value="0.8">80%</option></select><button class="save-overrides-btn" onclick="saveDiscount()" style="margin-left:6px">保存</button></span></div><div class="profit-tabs"><button class="profit-tab active" onclick="switchProfitTab(event,\'flip\')">倒卖利润</button><button class="profit-tab" onclick="switchProfitTab(event,\'realistic\')">蓝图材料零售价</button><button class="profit-tab" onclick="switchProfitTab(event,\'ideal\')">基础材料零售价</button><button class="profit-tab" onclick="switchProfitTab(event,\'conservative\')">收单价出售</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bp\')">蓝图材料批发价</button><button class="profit-tab" onclick="switchProfitTab(event,\'wholesale_bm\')">基础材料批发价</button></div><div style="font-size:11px;color:#484f58;margin-bottom:6px;line-height:1.5">零售价=吉他+皮尔米特最低卖单  批发价=(吉他+皮尔米特最高收单)×折扣率</div><div id="rankContent"><div class="loading">加载中...</div></div></div>';
   setTimeout(function(){ loadRanking(); }, 100);
   setTimeout(function(){ if (typeof loadDiscount === 'function') loadDiscount(); }, 200);
 }
@@ -303,7 +303,7 @@ function switchProfitTab(ev, tab) {
   for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
   ev.target.classList.add('active');
   var dw = document.getElementById('discountWrap');
-  if (dw) dw.style.display = (tab.indexOf('wholesale') === 0 && document.getElementById('rankMode').value === 'watchlist') ? 'inline-block' : 'none';
+  if (dw) dw.style.display = (tab.indexOf('wholesale') === 0) ? 'inline-block' : 'none';
   renderRankingTable();
 }
 
@@ -316,12 +316,15 @@ function toggleSort(field) {
 function renderRankingTable() {
   var el = document.getElementById('rankContent');
   if (!el || !rankData.length) { el.innerHTML = '<div class="no-result">暂无数据</div>'; return; }
-  var data = rankData.map(function(item) {
+  var data = [];
+  for (var di = 0; di < rankData.length; di++) {
+    var item = rankData[di];
+    if (currentProfitTab !== 'flip' && (!item[currentProfitTab])) continue;
     var profit = 0, margin = 0;
     if (currentProfitTab === 'flip') { profit = item.flip_profit||0; margin = item.flip_margin||0; }
-    else if (item[currentProfitTab]) { profit = item[currentProfitTab].profit||0; margin = item[currentProfitTab].margin||0; }
-    return { item: item, profit: profit, margin: margin };
-  });
+    else { profit = item[currentProfitTab].profit||0; margin = item[currentProfitTab].margin||0; }
+    data.push({ item: item, profit: profit, margin: margin });
+  }
   data.sort(function(a,b){
     var va = sortField==='profit'?a.profit:a.margin, vb = sortField==='profit'?b.profit:b.margin;
     return sortAsc ? va-vb : vb-va;

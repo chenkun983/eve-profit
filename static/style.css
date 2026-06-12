@@ -296,3 +296,5 @@ table tr:hover { background: #1c2128; }
   /* 模式卡片数值 */
   .mode-num { grid-template-columns: 4em 1fr; font-size: 12px; }
 }
+.ordItemSearch:empty:before{content:attr(data-ph);color:#484f58;pointer-events:none}
+.ordItemSearch:focus{outline:none;border-color:#58a6ff}

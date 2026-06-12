@@ -76,39 +76,62 @@ function showCreateOrder(){
 function addOrdItem(){
   var c=document.getElementById('ordItems');var idx=c.children.length;var div=document.createElement('div');div.className='ord-item-line';
   div.style.cssText='display:flex;gap:6px;margin-bottom:4px;flex-wrap:wrap;align-items:center';
-  div.innerHTML='<input type="text" class="ordItemSearch" placeholder="搜索物品.." autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px" oninput="searchOrdItem(this,'+idx+')" oncompositionstart="this._composing=true" oncompositionend="this._composing=false">'+
+  div.innerHTML='<div class="ordItemSearch" contenteditable="true" data-ph="搜索物品.." style="flex:1;min-width:120px;padding:6px 8px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px;cursor:text;white-space:nowrap;overflow:hidden" oninput="searchOrdItem(this)" onkeydown="if(event.key===\'Enter\')event.preventDefault()" oncompositionstart="this._composing=true" oncompositionend="this._composing=false;var $el=this;setTimeout(function(){$el._composing=false;searchOrdItem($el)},50)"></div>'+
     '<input type="hidden" class="ordItemId" value="0">数量: <input type="number" class="ordItemQty" value="1" min="1" style="width:110px;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px">'+
     '<input type="text" class="ordItemPrice" value="" placeholder="吉他最低售单价" autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" style="width:150px;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#c9d1d9;font-size:13px;text-align:right"> ISK<span style="color:#da3633;cursor:pointer;font-size:13px" onclick="this.parentElement.remove()">\u2715</span>';
   c.appendChild(div);
 }
+var _ordSearchTimer=null;
 function searchOrdItem(input,idx){
-  if(input._composing||input._selected){input._selected=false;return;}
-  var v=input.value.trim();if(v.length<1)return;
+  if(input._selected){input._selected=false;return;}
+  var v=(input.textContent||input.value||'').trim();
   var old=document.querySelector('.ord-search-menu');if(old)old.remove();
-  fetch('/api/search?q='+encodeURIComponent(v)).then(function(r){return r.json()}).then(function(d){
-    var list=(d.items||[]).filter(function(x){return x.name&&x.name.indexOf('ENV_')!==0;});if(list.length===0)return;
-    var menu=document.createElement('div');menu.className='ord-search-menu';
-    menu.style.cssText='position:fixed;background:#161b22;border:1px solid #30363d;border-radius:4px;z-index:100;max-height:200px;overflow-y:auto';
-    var r=input.getBoundingClientRect();var estH=Math.min(list.length,15)*28;menu.style.left=r.left+'px';menu.style.width=Math.max(r.width,200)+'px';if(r.bottom+estH+4>window.innerHeight){menu.style.bottom=(window.innerHeight-r.top+4)+'px';menu.style.top='';menu.style.maxHeight=Math.min(estH+8,r.top-8)+'px';}else{menu.style.top=(r.bottom+4)+'px';menu.style.bottom='';}
-    for(var i=0;i<Math.min(list.length,15);i++){
-      var it=document.createElement('div');it.textContent=list[i].name;
-      it.style.cssText='padding:6px 10px;cursor:pointer;font-size:12px;color:#c9d1d9';
-      it.onmouseover=function(){this.style.background='#1c2128';};it.onmouseout=function(){this.style.background='transparent';};
-      it.onclick=function(rid,rname,inp){return function(){
-        inp.value=rname;inp.parentElement.querySelector('.ordItemId').value=rid;inp._selected=true;menu.remove();
-        var pi=inp.parentElement.querySelector('.ordItemPrice');if(pi) fetch('/api/price?type_id='+rid).then(function(r2){return r2.json()}).then(function(pd){if(pd.ok&&pd.windows){var w=pd.windows['7d']||pd.windows['24h']||{};if(w.sell_min>0)pi.value=Number(w.sell_min).toLocaleString('zh-CN');}}).catch(function(){});
-      };}(list[i].typeID,list[i].name,input);
-      menu.appendChild(it);
-    }
-    document.body.appendChild(menu);input.onblur=function(){setTimeout(function(){if(menu.parentNode)menu.remove();},200);};
-  });
+  if(v.length<1)return;
+  clearTimeout(_ordSearchTimer);
+  _ordSearchTimer=setTimeout(function(){
+    var sv=v;
+    fetch('/api/search?q='+encodeURIComponent(v)).then(function(r){return r.json()}).then(function(d){
+      if(sv!==(input.textContent||'').trim())return;
+      var list=(d.items||[]).filter(function(x){return x.name&&x.name.indexOf('ENV_')!==0;});
+      if(list.length===0)return;
+      var menu=document.createElement('div');menu.className='ord-search-menu';
+      menu.style.cssText='position:fixed;background:#161b22;border:1px solid #30363d;border-radius:4px;z-index:100;max-height:200px;overflow-y:auto';
+      var r=input.getBoundingClientRect();var estH=Math.min(list.length,15)*28;
+      menu.style.left=r.left+'px';menu.style.width=Math.max(r.width,200)+'px';
+      if(r.bottom+estH+4>window.innerHeight){
+        menu.style.bottom=(window.innerHeight-r.top+4)+'px';menu.style.top='';menu.style.maxHeight=Math.min(estH+8,r.top-8)+'px';
+      }else{
+        menu.style.top=(r.bottom+4)+'px';menu.style.bottom='';
+      }
+      for(var i=0;i<Math.min(list.length,15);i++){
+        var it=document.createElement('div');it.textContent=list[i].name;
+        it.style.cssText='padding:6px 10px;cursor:pointer;font-size:12px;color:#c9d1d9';
+        it.onmouseover=function(){this.style.background='#1c2128';};it.onmouseout=function(){this.style.background='transparent';};
+        it.onclick=function(rid,rname,inp){return function(){
+          inp.textContent=rname;var $line=inp.closest('.ord-item-line')||inp.parentElement;
+          $line.querySelector('.ordItemId').value=rid;inp._selected=true;menu.remove();
+          var pi=$line.querySelector('.ordItemPrice');
+          if(pi){
+            if($line._priceAbort){$line._priceAbort.abort();}
+            var ac=new AbortController();$line._priceAbort=ac;
+            fetch('/api/price?type_id='+rid,{signal:ac.signal}).then(function(r2){return r2.json()}).then(function(pd){
+              if(ac.signal.aborted)return;
+              if(pd.ok&&pd.windows){var w=pd.windows['7d']||pd.windows['24h']||{};if(w.sell_min>0)pi.value=Number(w.sell_min).toLocaleString('zh-CN');}
+            }).catch(function(){});
+          }
+        };}(list[i].typeID,list[i].name,input);
+        menu.appendChild(it);
+      }
+      document.body.appendChild(menu);input.onblur=function(){setTimeout(function(){if(menu.parentNode)menu.remove();},200);};
+    }).catch(function(){});
+  },200);
 }
 function _parsePrice(v){if(!v)return 0;return parseFloat(String(v).replace(/,/g,''))||0;}
 function submitOrder(){
   var ot=document.getElementById('ordType').value;if(!ot){alert('请选择订单类型');return;}
   var contact=document.getElementById('ordContact').value.trim();if(!contact){alert('请填写游戏内ID');return;}
   var items=[];var lines=document.querySelectorAll('.ord-item-line');
-  for(var i=0;i<lines.length;i++){var tid=parseInt(lines[i].querySelector('.ordItemId').value)||0;var qty=parseInt(lines[i].querySelector('.ordItemQty').value)||0;var price=_parsePrice(lines[i].querySelector('.ordItemPrice').value);var name=lines[i].querySelector('.ordItemSearch').value.trim();if(tid&&qty>0)items.push({type_id:tid,name:name,qty:qty,expected_price:price});}
+  for(var i=0;i<lines.length;i++){var tid=parseInt(lines[i].querySelector('.ordItemId').value)||0;var qty=parseInt(lines[i].querySelector('.ordItemQty').value)||0;var price=_parsePrice(lines[i].querySelector('.ordItemPrice').value);var name=(lines[i].querySelector('.ordItemSearch').textContent||'').trim();if(tid&&qty>0)items.push({type_id:tid,name:name,qty:qty,expected_price:price});}
   if(items.length===0){alert('请至少添加一个有效物品');return;}
   var tk=window.authToken||localStorage.getItem('auth_token');var loc=document.getElementById('ordLocation').value.trim()||'游戏内对接';var notes=document.getElementById('ordNotes').value.trim();
   fetch('/api/orders/create?order_type='+ot+'&items='+encodeURIComponent(JSON.stringify(items))+'&contact_name='+encodeURIComponent(contact)+'&delivery_location='+encodeURIComponent(loc)+'&notes='+encodeURIComponent(notes),{method:'POST',headers:{'Authorization':'Bearer '+tk}}).then(function(r){return r.json()}).then(function(d){if(d.ok){alert('订单已发布！编号 #'+d.order_id);switchOrderTab({target:document.querySelectorAll('#pageOrders .profit-tab')[0]},'public');}else alert(d.message||'发布失败');});

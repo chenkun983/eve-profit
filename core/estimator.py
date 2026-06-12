@@ -263,7 +263,7 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                     'total_sell': round(m['quantity'] * mp.get('sell_min', 0), 2),
                 })
 
-            post_volume = round(sum(m['quantity'] * (m.get('volume') or get_item_volume(m['type_id'])) for m in mineral_details), 2)
+            post_volume = round(sum(m['quantity'] * (m.get('volume') or get_item_volume(m['type_id'])) for m in mineral_details) + residue * item_vol, 2)
 
             results.append({
                 'name': name,
@@ -287,7 +287,7 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
             # 基础矿物
             results.append({
                 'name': name, 'name_en': db.get_english_name(tid),
-                'quantity': qty, 'volume': item_vol, 'pre_volume': pre_vol,
+                'quantity': qty, 'volume': item_vol, 'pre_volume': pre_vol, 'post_volume': pre_vol,
                 'has_reprocess': False,
                 'sell_price': sell_min, 'buy_price': buy_max,
                 'direct_sell_total': round(sell_min * qty, 2),
@@ -301,7 +301,7 @@ def estimate_items(items: list, reprocess_rate: float = 0.55, ore_rate: float = 
                 'name': name,
                 'name_en': db.get_english_name(tid),
                 'quantity': qty,
-                'volume': item_vol, 'pre_volume': pre_vol,
+                'volume': item_vol, 'pre_volume': pre_vol, 'post_volume': pre_vol,
                 'has_reprocess': False,
                 'residue': residue,
                 'sell_price': sell_min,
